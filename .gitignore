@@ -1,0 +1,8 @@
+*.exe
+*.log
+.env
+local.env
+tmp/
+.gradle/
+build/
+android/**/build/

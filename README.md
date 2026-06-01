@@ -5,12 +5,13 @@ ClipSync Pro is a private-deployment clipboard history and cross-device sync sys
 This repository currently contains a Go-based MVP foundation that can be built in the current workspace:
 
 - `cmd/clipsync-server`: HTTP sync server with record APIs and Server-Sent Events at the PRD-compatible `/ws/v1/sync` path.
-- `cmd/clipsync-windows`: Windows local agent with clipboard polling, local MySQL storage, sync queue, `Alt + V` hotkey hook, and a local web UI.
+- `cmd/clipsync-windows`: native Windows client with clipboard polling, local MySQL storage, sync queue, `Alt + V` hotkey hook, and Win32 desktop UI.
+- `android`: native Android Kotlin client source with foreground clipboard service, server upload, record list, reveal, copy, and delete flows.
 - `internal/domain`: shared record and sync event model.
 - `internal/security`: AES-256-GCM encryption and keyed sensitive search indexes.
 - `internal/storage`: memory and MySQL storage implementations.
 
-The target product architecture remains Windows native desktop + Android native client + Go sync server. Because Rust/Cargo and Gradle are not available in this environment, the checked-in MVP uses Go end to end for the runnable Windows and server slice.
+The target product architecture is native Windows desktop + native Android client + Go sync server. The previous local web surface is retained only as an optional debug handler inside `internal/agent`; the default Windows entrypoint is native Win32 UI.
 
 ## Quick Start
 
@@ -24,6 +25,16 @@ Default server address:
 
 ```text
 http://127.0.0.1:37617
+```
+
+Use MySQL-backed server storage:
+
+```powershell
+$env:CLIPSYNC_SERVER_STORAGE = "mysql"
+$env:mysql_user = "root"
+$env:mysql_pwd = "your-password"
+$env:CLIPSYNC_MYSQL_DB = "clipsync_server"
+go run .\cmd\clipsync-server
 ```
 
 ### Windows Agent
@@ -44,10 +55,23 @@ Run the agent:
 go run .\cmd\clipsync-windows
 ```
 
-Local UI:
+The client opens a native Windows window. `Alt + V` toggles that window.
+
+Optional debug web UI for development remains available by calling `agent.Run` from a separate diagnostic entrypoint; it is not the product client.
+
+### Android Client
+
+The native Android source lives in:
 
 ```text
-http://127.0.0.1:37618
+android/
+```
+
+Build with Android Studio or a machine with Gradle and Android SDK installed:
+
+```powershell
+cd android
+gradle :app:assembleDebug
 ```
 
 ## Verification
