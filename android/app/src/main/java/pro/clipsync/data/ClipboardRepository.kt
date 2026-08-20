@@ -123,4 +123,8 @@ class ClipboardRepository(private val context: Context) {
         val id = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "android"
         return "android_$id"
     }
+
+    companion object {
+        const val INTERNAL_CLIP_LABEL = "pro.clipsync.internal"
+    }
 }

@@ -55,6 +55,7 @@ type Store interface {
 	UpsertRecord(ctx context.Context, rec domain.ClipboardRecord) error
 	GetRecord(ctx context.Context, id string) (domain.ClipboardRecord, error)
 	ListRecords(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error)
+	ListRecordSummaries(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error)
 	DeleteRecords(ctx context.Context, ids []string) error
 	Enqueue(ctx context.Context, item SyncQueueItem) (int64, error)
 	ListPendingQueue(ctx context.Context, limit int) ([]SyncQueueItem, error)

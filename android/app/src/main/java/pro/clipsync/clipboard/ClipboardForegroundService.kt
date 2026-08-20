@@ -41,6 +41,9 @@ class ClipboardForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private val listener = ClipboardManager.OnPrimaryClipChangedListener {
+        if (clipboard.primaryClipDescription?.label?.toString() == ClipboardRepository.INTERNAL_CLIP_LABEL) {
+            return@OnPrimaryClipChangedListener
+        }
         val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
         if (text == lastText) return@OnPrimaryClipChangedListener
         lastText = text

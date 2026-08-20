@@ -26,12 +26,13 @@ type Config struct {
 }
 
 type Agent struct {
-	cfg     Config
-	store   storage.Store
-	service *app.Service
-	sync    *syncer.Client
-	reveals revealCache
-	events  *httpapi.Hub
+	cfg             Config
+	store           storage.Store
+	service         *app.Service
+	sync            *syncer.Client
+	reveals         revealCache
+	events          *httpapi.Hub
+	clipboardWrites *clipboardWriteGuard
 }
 
 func New(store storage.Store, cfg Config) *Agent {
@@ -58,12 +59,13 @@ func New(store storage.Store, cfg Config) *Agent {
 		syncClient = syncer.NewClient(cfg.ServerURL)
 	}
 	return &Agent{
-		cfg:     cfg,
-		store:   store,
-		service: service,
-		sync:    syncClient,
-		reveals: newRevealCache(),
-		events:  httpapi.NewHub(),
+		cfg:             cfg,
+		store:           store,
+		service:         service,
+		sync:            syncClient,
+		reveals:         newRevealCache(),
+		events:          httpapi.NewHub(),
+		clipboardWrites: newClipboardWriteGuard(win32.ClipboardSequenceNumber),
 	}
 }
 
@@ -101,7 +103,7 @@ func (a *Agent) runClipboardLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			snapshot, err := win32.ReadClipboard()
+			snapshot, suppressed, err := a.clipboardWrites.read(win32.ReadClipboard)
 			if err != nil {
 				continue
 			}
@@ -109,6 +111,9 @@ func (a *Agent) runClipboardLoop(ctx context.Context) {
 				continue
 			}
 			lastSeq = snapshot.Sequence
+			if suppressed {
+				continue
+			}
 			if !snapshot.HasText && !snapshot.HasImage {
 				continue
 			}
@@ -122,7 +127,7 @@ func (a *Agent) runClipboardLoop(ctx context.Context) {
 			}
 			a.broadcastLocalEvent(domain.SyncEvent{
 				EventType: domain.EventRecordCreated,
-				Record:    &rec,
+				RecordID:  rec.ID,
 				Occurred:  time.Now().UTC(),
 				DeviceID:  a.cfg.DeviceID,
 			})
@@ -163,10 +168,22 @@ func (a *Agent) runEventLoop(ctx context.Context) {
 		err := a.sync.Subscribe(ctx, a.cfg.DeviceID, func(event domain.SyncEvent) error {
 			switch event.EventType {
 			case domain.EventRecordCreated, domain.EventRecordUpdated:
+				var record domain.ClipboardRecord
 				if event.Record != nil {
-					if err := a.store.UpsertRecord(ctx, *event.Record); err != nil {
+					record = *event.Record
+				} else if event.RecordID != "" {
+					var err error
+					record, err = a.sync.GetRecord(ctx, event.RecordID)
+					if err != nil {
 						return err
 					}
+				}
+				if record.ID != "" {
+					if err := a.store.UpsertRecord(ctx, record); err != nil {
+						return err
+					}
+					event.RecordID = record.ID
+					event.Record = nil
 				}
 			case domain.EventRecordDeleted:
 				if event.RecordID != "" {

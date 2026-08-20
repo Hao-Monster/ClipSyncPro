@@ -199,7 +199,7 @@ func (a *Agent) filterFromRequest(w http.ResponseWriter, r *http.Request) (stora
 	filter := storage.Filter{
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		SensitiveOnly: q.Get("sensitive") == "true",
-		Limit:         1000,
+		Limit:         10,
 	}
 	if rawDate := q.Get("date"); rawDate != "" {
 		start, end, err := domain.ParseFilterDate(rawDate)
@@ -341,7 +341,7 @@ func (a *Agent) handleCopy(w http.ResponseWriter, r *http.Request, id string) {
 			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "image data is invalid"})
 			return
 		}
-		if err := win32.WriteClipboardImage(mimeType, data); err != nil {
+		if err := a.clipboardWrites.write(func() error { return win32.WriteClipboardImage(mimeType, data) }); err != nil {
 			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
 			return
 		}
@@ -353,7 +353,7 @@ func (a *Agent) handleCopy(w http.ResponseWriter, r *http.Request, id string) {
 		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := win32.WriteClipboardText(text); err != nil {
+	if err := a.clipboardWrites.write(func() error { return win32.WriteClipboardText(text) }); err != nil {
 		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
 		return
 	}
@@ -367,7 +367,7 @@ func (a *Agent) handlePaste(w http.ResponseWriter, r *http.Request, id string) {
 			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "image data is invalid"})
 			return
 		}
-		if err := win32.PasteImage(mimeType, data); err != nil {
+		if err := a.clipboardWrites.write(func() error { return win32.PasteImage(mimeType, data) }); err != nil {
 			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "paste failed"})
 			return
 		}
@@ -379,7 +379,7 @@ func (a *Agent) handlePaste(w http.ResponseWriter, r *http.Request, id string) {
 		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := win32.PasteText(text); err != nil {
+	if err := a.clipboardWrites.write(func() error { return win32.PasteText(text) }); err != nil {
 		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "paste failed"})
 		return
 	}
@@ -484,7 +484,7 @@ func (a *Agent) handleCaptureCurrent(w http.ResponseWriter, r *http.Request) {
 	}
 	a.broadcastLocalEvent(domain.SyncEvent{
 		EventType: domain.EventRecordCreated,
-		Record:    &rec,
+		RecordID:  rec.ID,
 		Occurred:  time.Now().UTC(),
 		DeviceID:  a.cfg.DeviceID,
 	})
@@ -502,7 +502,7 @@ func requestBaseURL(r *http.Request) string {
 func (a *Agent) broadcastRecordUpdated(rec domain.ClipboardRecord) {
 	a.broadcastLocalEvent(domain.SyncEvent{
 		EventType: domain.EventRecordUpdated,
-		Record:    &rec,
+		RecordID:  rec.ID,
 		Occurred:  time.Now().UTC(),
 		DeviceID:  a.cfg.DeviceID,
 	})

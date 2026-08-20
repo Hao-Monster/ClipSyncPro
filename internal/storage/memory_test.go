@@ -36,3 +36,25 @@ func TestMemoryStoreListAndDelete(t *testing.T) {
 		t.Fatalf("expected delete to remove record")
 	}
 }
+
+func TestMemoryStoreSummaryListOmitsImageBody(t *testing.T) {
+	store := NewMemoryStore()
+	rec, err := domain.NewClipboardImageRecord("local", "dev", domain.PlatformWindows, "image/png", []byte("large-image-body"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertRecord(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+
+	records, err := store.ListRecordSummaries(context.Background(), Filter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("record count = %d", len(records))
+	}
+	if records[0].ContentText != "" {
+		t.Fatalf("image body leaked into summary list: %d bytes", len(records[0].ContentText))
+	}
+}

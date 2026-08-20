@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -91,6 +92,26 @@ func (c *Client) ListRecords(ctx context.Context, query string) ([]domain.Clipbo
 		return nil, err
 	}
 	return body.Records, nil
+}
+
+func (c *Client) GetRecord(ctx context.Context, id string) (domain.ClipboardRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/clipboard/records/"+url.PathEscape(id), nil)
+	if err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return domain.ClipboardRecord{}, responseError(resp)
+	}
+	var record domain.ClipboardRecord
+	if err := json.NewDecoder(resp.Body).Decode(&record); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	return record, nil
 }
 
 func (c *Client) FlushQueue(ctx context.Context, store storage.Store, limit int) error {

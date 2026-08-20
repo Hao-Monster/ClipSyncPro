@@ -168,6 +168,14 @@ FROM clipboard_record WHERE id = ? LIMIT 1`, id)
 }
 
 func (s *MySQLStore) ListRecords(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error) {
+	return s.listRecords(ctx, filter, false)
+}
+
+func (s *MySQLStore) ListRecordSummaries(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error) {
+	return s.listRecords(ctx, filter, true)
+}
+
+func (s *MySQLStore) listRecords(ctx context.Context, filter Filter, summariesOnly bool) ([]domain.ClipboardRecord, error) {
 	clauses := []string{"1=1"}
 	args := make([]any, 0)
 	if filter.UserID != "" {
@@ -189,11 +197,15 @@ func (s *MySQLStore) ListRecords(ctx context.Context, filter Filter) ([]domain.C
 		args = append(args, *filter.DateEnd)
 	}
 	if filter.Keyword != "" {
-		clauses = append(clauses, "(LOWER(content_text) LIKE ? OR is_sensitive = 1)")
+		clauses = append(clauses, "((content_type <> 'image' AND LOWER(content_text) LIKE ?) OR is_sensitive = 1)")
 		args = append(args, "%"+strings.ToLower(filter.Keyword)+"%")
 	}
+	contentColumn := "content_text"
+	if summariesOnly {
+		contentColumn = "CASE WHEN content_type = 'image' THEN NULL ELSE content_text END"
+	}
 	query := `
-SELECT id, user_id, content_type, content_text, content_cipher, content_hash,
+SELECT id, user_id, content_type, ` + contentColumn + ` AS content_text, content_cipher, content_hash,
        is_sensitive, sensitive_type, account_cipher, password_cipher, remark_cipher,
        search_index, source_device_id, source_platform, client_created_at,
        server_created_at, updated_at, deleted_at, sync_status

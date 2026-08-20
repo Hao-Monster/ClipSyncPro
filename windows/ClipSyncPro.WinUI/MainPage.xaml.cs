@@ -1,11 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.System;
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace ClipSyncPro_WinUI;
 
@@ -15,6 +15,7 @@ public sealed partial class MainPage : Page
     private readonly ObservableCollection<ClipboardRecordView> _records = [];
     private readonly SemaphoreSlim _loadGate = new(1, 1);
     private CancellationTokenSource? _lifetime;
+    private DispatcherQueueTimer? _eventRefreshTimer;
     private ClipboardRecordView? _selected;
     private string _date = "";
     private bool _sensitiveOnly;
@@ -28,6 +29,13 @@ public sealed partial class MainPage : Page
     private async void Page_Loaded(object sender, RoutedEventArgs e)
     {
         _lifetime = new CancellationTokenSource();
+        if (_eventRefreshTimer is null)
+        {
+            _eventRefreshTimer = DispatcherQueue.CreateTimer();
+            _eventRefreshTimer.Interval = TimeSpan.FromMilliseconds(250);
+            _eventRefreshTimer.IsRepeating = false;
+            _eventRefreshTimer.Tick += EventRefreshTimer_Tick;
+        }
         await AgentLauncher.EnsureRunningAsync(_lifetime.Token);
         _ = Task.Run(() => WatchAgentEventsAsync(_lifetime.Token));
         await LoadRecordsAsync();
@@ -35,6 +43,7 @@ public sealed partial class MainPage : Page
 
     private void Page_Unloaded(object sender, RoutedEventArgs e)
     {
+        _eventRefreshTimer?.Stop();
         _lifetime?.Cancel();
         _lifetime?.Dispose();
         _lifetime = null;
@@ -84,7 +93,7 @@ public sealed partial class MainPage : Page
                     var line = await reader.ReadLineAsync(cancellationToken);
                     if (line?.StartsWith("data: ", StringComparison.Ordinal) == true)
                     {
-                        DispatcherQueue.TryEnqueue(async () => await LoadRecordsAsync());
+                        QueueEventRefresh();
                     }
                 }
             }
@@ -97,6 +106,24 @@ public sealed partial class MainPage : Page
                 await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
             }
         }
+    }
+
+    private void QueueEventRefresh()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_eventRefreshTimer is null || _lifetime?.IsCancellationRequested != false)
+            {
+                return;
+            }
+            _eventRefreshTimer.Stop();
+            _eventRefreshTimer.Start();
+        });
+    }
+
+    private async void EventRefreshTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        await LoadRecordsAsync();
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e)

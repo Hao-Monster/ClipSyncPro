@@ -96,7 +96,7 @@ func (s *Service) List(ctx context.Context, filter storage.Filter) ([]domain.Cli
 	if filter.Keyword != "" {
 		filter.KeywordHashes = security.BuildQueryIndex(s.secret, filter.Keyword)
 	}
-	return s.store.ListRecords(ctx, filter)
+	return s.store.ListRecordSummaries(ctx, filter)
 }
 
 func (s *Service) MarkPassword(ctx context.Context, id, account, remark string) (domain.ClipboardRecord, error) {

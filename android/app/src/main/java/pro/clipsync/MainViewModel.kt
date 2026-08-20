@@ -117,7 +117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("ClipSync Pro", text))
+        clipboard.setPrimaryClip(ClipData.newPlainText(ClipboardRepository.INTERNAL_CLIP_LABEL, text))
         _state.update { it.copy(status = "已复制") }
     }
 

@@ -58,6 +58,19 @@ func (s *MemoryStore) ListRecords(_ context.Context, filter Filter) ([]domain.Cl
 	return records, nil
 }
 
+func (s *MemoryStore) ListRecordSummaries(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error) {
+	records, err := s.ListRecords(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	for i := range records {
+		if records[i].ContentType == domain.ContentImage {
+			records[i].ContentText = ""
+		}
+	}
+	return records, nil
+}
+
 func (s *MemoryStore) DeleteRecords(_ context.Context, ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

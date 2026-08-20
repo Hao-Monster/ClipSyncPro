@@ -53,6 +53,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleList(w, r)
 	case path == "/api/v1/clipboard/records/batch-delete" && r.Method == http.MethodPost:
 		s.handleBatchDelete(w, r)
+	case strings.HasPrefix(path, "/api/v1/clipboard/records/") && r.Method == http.MethodGet:
+		id := strings.TrimPrefix(path, "/api/v1/clipboard/records/")
+		s.handleGet(w, r, id)
 	case strings.HasPrefix(path, "/api/v1/clipboard/records/") && r.Method == http.MethodDelete:
 		id := strings.TrimPrefix(path, "/api/v1/clipboard/records/")
 		s.handleDelete(w, r, id)
@@ -98,11 +101,28 @@ func (s *Server) handleUpsert(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.Broadcast(domain.SyncEvent{
 		EventType: eventType,
-		Record:    &rec,
+		RecordID:  rec.ID,
 		Occurred:  now,
 		DeviceID:  rec.SourceDeviceID,
 	})
 	writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	record, err := s.store.GetRecord(r.Context(), id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store read failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +130,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	records, err := s.store.ListRecords(r.Context(), filter)
+	records, err := s.store.ListRecordSummaries(r.Context(), filter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store list failed"})
 		return
@@ -124,7 +144,7 @@ func (s *Server) filterFromQuery(w http.ResponseWriter, r *http.Request) (storag
 		UserID:        q.Get("user_id"),
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		SensitiveOnly: q.Get("sensitive") == "true" || q.Get("sensitive") == "1",
-		Limit:         500,
+		Limit:         10,
 	}
 	if filter.UserID == "" {
 		filter.UserID = "local"

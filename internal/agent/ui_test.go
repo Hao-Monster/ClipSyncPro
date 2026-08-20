@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -135,14 +136,53 @@ func TestAgentUpdateRemarkRefreshesRevealCacheAndBroadcasts(t *testing.T) {
 		if event.EventType != domain.EventRecordUpdated {
 			t.Fatalf("event type = %q", event.EventType)
 		}
-		if event.Record == nil || event.Record.ID != rec.ID {
-			t.Fatalf("unexpected event record: %+v", event.Record)
+		if event.Record != nil {
+			t.Fatal("local event must not embed the complete record")
+		}
+		if event.RecordID != rec.ID {
+			t.Fatalf("event record id = %q", event.RecordID)
 		}
 		if event.DeviceID != "dev-1" {
 			t.Fatalf("event device id = %q", event.DeviceID)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for update event")
+	}
+}
+
+func TestAgentListsAtMostTenMostRecentRecords(t *testing.T) {
+	store := storage.NewMemoryStore()
+	a := New(store, Config{DeviceID: "dev-1"})
+	ctx := context.Background()
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 12; i++ {
+		rec, err := domain.NewClipboardRecord("local", "dev-1", domain.PlatformWindows, fmt.Sprintf("item-%02d", i), base.Add(time.Duration(i)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertRecord(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	a.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/records", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var response struct {
+		Records []struct {
+			Summary string `json:"summary"`
+		} `json:"records"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Records) != 10 {
+		t.Fatalf("record count = %d, want 10", len(response.Records))
+	}
+	if response.Records[0].Summary != "item-11" || response.Records[9].Summary != "item-02" {
+		t.Fatalf("unexpected order: first=%q last=%q", response.Records[0].Summary, response.Records[9].Summary)
 	}
 }
 
