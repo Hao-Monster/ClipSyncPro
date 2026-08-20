@@ -47,3 +47,49 @@ func TestClipboardPNGToDIB(t *testing.T) {
 		t.Fatalf("unexpected DIB header or size: %d", len(dib))
 	}
 }
+
+func TestClipboardDIBToPNGRetainsPixelsAndOrientation(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	img.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 255})
+	img.SetNRGBA(1, 0, color.NRGBA{G: 255, A: 255})
+	img.SetNRGBA(0, 1, color.NRGBA{B: 255, A: 255})
+	img.SetNRGBA(1, 1, color.NRGBA{R: 255, G: 255, A: 255})
+	var source bytes.Buffer
+	if err := png.Encode(&source, img); err != nil {
+		t.Fatal(err)
+	}
+	dib, err := clipboardDIBFromPNG(source.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := clipboardPNGFromDIB(dib)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := png.Decode(bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			want := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			actual := color.NRGBAModel.Convert(got.At(x, y)).(color.NRGBA)
+			if actual != want {
+				t.Fatalf("pixel (%d,%d) = %#v, want %#v", x, y, actual, want)
+			}
+		}
+	}
+}
+
+func TestClipboardDIBToPNGRejectsCompressedFormats(t *testing.T) {
+	dib := make([]byte, 44)
+	binary.LittleEndian.PutUint32(dib[0:4], 40)
+	binary.LittleEndian.PutUint32(dib[4:8], 1)
+	binary.LittleEndian.PutUint32(dib[8:12], 1)
+	binary.LittleEndian.PutUint16(dib[12:14], 1)
+	binary.LittleEndian.PutUint16(dib[14:16], 32)
+	binary.LittleEndian.PutUint32(dib[16:20], 1)
+	if _, err := clipboardPNGFromDIB(dib); err == nil {
+		t.Fatal("expected unsupported compressed DIB to fail")
+	}
+}

@@ -23,6 +23,8 @@ type Server struct {
 	now    func() time.Time
 }
 
+const maxRecordRequestBytes = 90 << 20
+
 func NewServer(store storage.Store, secret string) *Server {
 	return &Server{
 		store:  store,
@@ -66,8 +68,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpsert(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecordRequestBytes)
 	var rec domain.ClipboardRecord
 	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "record is too large"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
@@ -122,7 +130,12 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, id string) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store read failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, record)
+	wireRecord, err := domain.ClipboardRecordForWire(record)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "record image is invalid"})
+		return
+	}
+	writeJSON(w, http.StatusOK, wireRecord)
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {

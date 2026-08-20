@@ -24,7 +24,10 @@ func TestCaptureImagePersistsAndQueuesRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, got, err := domain.DecodeClipboardImage(stored.ContentText)
+	if stored.ContentText != "" {
+		t.Fatalf("image was persisted as text: %d bytes", len(stored.ContentText))
+	}
+	_, got, err := domain.DecodeClipboardRecordImage(stored)
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("stored image mismatch: %v %x", err, got)
 	}

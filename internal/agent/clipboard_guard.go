@@ -38,7 +38,9 @@ func (g *clipboardWriteGuard) read(read func() (win32.ClipboardSnapshot, error))
 	if err != nil {
 		return snapshot, false, err
 	}
-	return snapshot, g.consumeSuppression(snapshot.Sequence), nil
+	localWrite := g.consumeSuppression(snapshot.Sequence)
+	globalWrite := win32.ConsumeClipboardWrite(snapshot.Sequence)
+	return snapshot, localWrite || globalWrite, nil
 }
 
 func (g *clipboardWriteGuard) shouldSuppress(sequence uint32) bool {

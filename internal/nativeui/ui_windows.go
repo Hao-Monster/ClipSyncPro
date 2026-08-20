@@ -710,7 +710,7 @@ func (a *App) revealSelected(anchor uintptr) {
 func (a *App) copySelected() {
 	rec, selected := a.selectedRecord()
 	if selected && rec.ContentType == domain.ContentImage {
-		mimeType, data, err := domain.DecodeClipboardImage(rec.ContentText)
+		mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
 		if err != nil {
 			a.showError("图片数据无效")
 			return
@@ -732,7 +732,7 @@ func (a *App) copySelected() {
 func (a *App) pasteSelected() {
 	rec, selected := a.selectedRecord()
 	if selected && rec.ContentType == domain.ContentImage {
-		mimeType, data, err := domain.DecodeClipboardImage(rec.ContentText)
+		mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
 		if err != nil {
 			a.showError("图片数据无效")
 			return

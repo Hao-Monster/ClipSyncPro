@@ -64,6 +64,8 @@ type ClipboardRecord struct {
 	UserID          string        `json:"user_id"`
 	ContentType     ContentType   `json:"content_type"`
 	ContentText     string        `json:"content_text,omitempty"`
+	ImageMIMEType   string        `json:"-"`
+	ImageData       []byte        `json:"-"`
 	ContentCipher   *CipherText   `json:"content_cipher,omitempty"`
 	ContentHash     string        `json:"content_hash"`
 	IsSensitive     bool          `json:"is_sensitive"`

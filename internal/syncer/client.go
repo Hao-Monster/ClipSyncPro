@@ -22,6 +22,8 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+const DefaultQueueBatchBytes = 16 << 20
+
 func NewClient(baseURL string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),
@@ -32,11 +34,19 @@ func NewClient(baseURL string) *Client {
 }
 
 func (c *Client) PushRecord(ctx context.Context, rec domain.ClipboardRecord) (domain.ClipboardRecord, error) {
-	var body bytes.Buffer
-	if err := json.NewEncoder(&body).Encode(rec); err != nil {
+	wireRecord, err := domain.ClipboardRecordForWire(rec)
+	if err != nil {
 		return domain.ClipboardRecord{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/clipboard/records", &body)
+	payload, err := json.Marshal(wireRecord)
+	if err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	return c.pushRecordPayload(ctx, payload)
+}
+
+func (c *Client) pushRecordPayload(ctx context.Context, payload []byte) (domain.ClipboardRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/clipboard/records", bytes.NewReader(payload))
 	if err != nil {
 		return domain.ClipboardRecord{}, err
 	}
@@ -114,13 +124,26 @@ func (c *Client) GetRecord(ctx context.Context, id string) (domain.ClipboardReco
 	return record, nil
 }
 
-func (c *Client) FlushQueue(ctx context.Context, store storage.Store, limit int) error {
-	items, err := store.ListPendingQueue(ctx, limit)
+func (c *Client) FlushQueue(ctx context.Context, store storage.Store, maxItems, maxBytes int) error {
+	if maxBytes <= 0 {
+		maxBytes = DefaultQueueBatchBytes
+	}
+	items, err := store.ListPendingQueue(ctx, maxItems)
 	if err != nil {
 		return err
 	}
+	consumedBytes := 0
 	for _, item := range items {
-		if err := c.flushOne(ctx, store, item); err != nil {
+		payload, err := queueItemPayload(ctx, store, item)
+		if err != nil {
+			_ = store.MarkQueueRetry(ctx, item.ID, err.Error())
+			continue
+		}
+		if consumedBytes > 0 && consumedBytes+len(payload) > maxBytes {
+			break
+		}
+		consumedBytes += len(payload)
+		if err := c.flushOne(ctx, store, item, payload); err != nil {
 			_ = store.MarkQueueRetry(ctx, item.ID, err.Error())
 			continue
 		}
@@ -131,14 +154,29 @@ func (c *Client) FlushQueue(ctx context.Context, store storage.Store, limit int)
 	return nil
 }
 
-func (c *Client) flushOne(ctx context.Context, store storage.Store, item storage.SyncQueueItem) error {
+func queueItemPayload(ctx context.Context, store storage.Store, item storage.SyncQueueItem) ([]byte, error) {
 	switch item.Action {
 	case storage.QueueCreate, storage.QueueUpdate:
-		var rec domain.ClipboardRecord
-		if err := json.Unmarshal([]byte(item.Payload), &rec); err != nil {
-			return err
+		rec, err := store.GetRecord(ctx, item.RecordID)
+		if err != nil {
+			return nil, err
 		}
-		saved, err := c.PushRecord(ctx, rec)
+		wireRecord, err := domain.ClipboardRecordForWire(rec)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(wireRecord)
+	case storage.QueueDelete:
+		return []byte(item.RecordID), nil
+	default:
+		return nil, fmt.Errorf("unknown queue action %q", item.Action)
+	}
+}
+
+func (c *Client) flushOne(ctx context.Context, store storage.Store, item storage.SyncQueueItem, payload []byte) error {
+	switch item.Action {
+	case storage.QueueCreate, storage.QueueUpdate:
+		saved, err := c.pushRecordPayload(ctx, payload)
 		if err != nil {
 			return err
 		}

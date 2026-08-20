@@ -40,15 +40,15 @@ const (
 )
 
 type SyncQueueItem struct {
-	ID         int64       `json:"id"`
-	RecordID   string      `json:"record_id"`
-	Action     QueueAction `json:"action"`
-	Payload    string      `json:"payload"`
-	RetryCount int         `json:"retry_count"`
-	Status     QueueStatus `json:"status"`
-	LastError  string      `json:"last_error,omitempty"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
+	ID            int64       `json:"id"`
+	RecordID      string      `json:"record_id"`
+	Action        QueueAction `json:"action"`
+	RetryCount    int         `json:"retry_count"`
+	Status        QueueStatus `json:"status"`
+	LastError     string      `json:"last_error,omitempty"`
+	NextAttemptAt time.Time   `json:"next_attempt_at"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }
 
 type Store interface {
@@ -61,6 +61,20 @@ type Store interface {
 	ListPendingQueue(ctx context.Context, limit int) ([]SyncQueueItem, error)
 	MarkQueueDone(ctx context.Context, id int64) error
 	MarkQueueRetry(ctx context.Context, id int64, errText string) error
+}
+
+func QueueRetryDelay(retryCount int) time.Duration {
+	if retryCount < 1 {
+		retryCount = 1
+	}
+	if retryCount > 9 {
+		return 15 * time.Minute
+	}
+	delay := 5 * time.Second * time.Duration(1<<uint(retryCount-1))
+	if delay > 15*time.Minute {
+		return 15 * time.Minute
+	}
+	return delay
 }
 
 func RecordMatchesFilter(rec domain.ClipboardRecord, filter Filter) bool {

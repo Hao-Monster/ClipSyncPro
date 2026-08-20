@@ -57,7 +57,7 @@ go run .\cmd\clipsync-windows
 
 The client opens a native Windows window. `Alt + V` toggles that window.
 
-On first launch, the Windows client registers itself in the current user's `Run` key. Clipboard images are captured as `image` records and can be viewed, copied, and pasted again from the WinUI client.
+On first launch, the Windows client registers itself in the current user's `Run` key. Clipboard images are normalized to PNG, stored as MySQL BLOBs, and can be viewed, copied, and pasted again from the WinUI client. The list loads only the ten most recent matching records and does not load image bodies.
 
 Optional debug web UI for development remains available by calling `agent.Run` from a separate diagnostic entrypoint; it is not the product client.
 
@@ -84,6 +84,29 @@ go build ./cmd/clipsync-server
 go build ./cmd/clipsync-windows
 ```
 
+Run the isolated MySQL migration test (it creates and removes a random `clipsync_test_*` database):
+
+```powershell
+$env:CLIPSYNC_MYSQL_INTEGRATION = "1"
+go test ./internal/storage -run TestMySQLLegacyMigrationsAndBinaryImageStorage -count=1 -v
+```
+
+## Upgrade Migration
+
+Do not start an upgraded agent against an existing database before migrating its legacy image and queue data. The application enforces this ordering and exits with `legacy ClipSync Pro data migration is required` while old rows remain. First stop the agent and sync server, take and verify a restorable backup, then inspect the read-only plan:
+
+```powershell
+go run ./cmd/clipsync-migrate
+```
+
+Apply only after checking the plan. The database name confirmation and backup acknowledgement are mandatory safeguards:
+
+```powershell
+go run ./cmd/clipsync-migrate --apply --confirm-database=clipsync_pro --backup-confirmed
+```
+
+The migration is resumable for images, validates image hashes before clearing legacy text, and atomically compacts the pending queue to one payload-free action per record. Rollback requires stopping the upgraded application and restoring the verified pre-migration backup.
+
 ## Documents
 
 - [Architecture](docs/architecture.md)
@@ -91,3 +114,4 @@ go build ./cmd/clipsync-windows
 - [Detailed Design](docs/detailed-design.md)
 - [API](docs/api.md)
 - [Database Schema](docs/schema.sql)
+- [Technical Debt](docs/technical-debt.md)

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -259,15 +258,10 @@ func (s *Service) Delete(ctx context.Context, ids []string) error {
 	if err := s.store.DeleteRecords(ctx, ids); err != nil {
 		return err
 	}
-	payload, err := json.Marshal(map[string][]string{"ids": ids})
-	if err != nil {
-		return err
-	}
 	for _, id := range ids {
 		if _, err := s.store.Enqueue(ctx, storage.SyncQueueItem{
 			RecordID:  id,
 			Action:    storage.QueueDelete,
-			Payload:   string(payload),
 			Status:    storage.QueuePending,
 			CreatedAt: s.now(),
 		}); err != nil {
@@ -278,14 +272,9 @@ func (s *Service) Delete(ctx context.Context, ids []string) error {
 }
 
 func (s *Service) enqueueRecord(ctx context.Context, action storage.QueueAction, rec domain.ClipboardRecord) error {
-	payload, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	_, err = s.store.Enqueue(ctx, storage.SyncQueueItem{
+	_, err := s.store.Enqueue(ctx, storage.SyncQueueItem{
 		RecordID:  rec.ID,
 		Action:    action,
-		Payload:   string(payload),
 		Status:    storage.QueuePending,
 		CreatedAt: s.now(),
 	})

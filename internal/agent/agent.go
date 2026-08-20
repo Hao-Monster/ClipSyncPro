@@ -150,7 +150,7 @@ func (a *Agent) runSyncLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := a.sync.FlushQueue(ctx, a.store, 50); err != nil {
+			if err := a.sync.FlushQueue(ctx, a.store, 50, syncer.DefaultQueueBatchBytes); err != nil {
 				log.Printf("sync flush failed: %v", err)
 			}
 		}

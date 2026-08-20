@@ -252,7 +252,7 @@ func (a *Agent) handleRecordContent(w http.ResponseWriter, r *http.Request, id s
 		writeAgentJSON(w, http.StatusNotFound, map[string]string{"error": "image not found"})
 		return
 	}
-	mimeType, data, err := domain.DecodeClipboardImage(rec.ContentText)
+	mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
 	if err != nil {
 		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "image data is invalid"})
 		return
@@ -336,7 +336,7 @@ func (a *Agent) handleUpdateRemark(w http.ResponseWriter, r *http.Request, id st
 
 func (a *Agent) handleCopy(w http.ResponseWriter, r *http.Request, id string) {
 	if rec, err := a.store.GetRecord(r.Context(), id); err == nil && rec.ContentType == domain.ContentImage {
-		mimeType, data, err := domain.DecodeClipboardImage(rec.ContentText)
+		mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
 		if err != nil {
 			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "image data is invalid"})
 			return
@@ -362,7 +362,7 @@ func (a *Agent) handleCopy(w http.ResponseWriter, r *http.Request, id string) {
 
 func (a *Agent) handlePaste(w http.ResponseWriter, r *http.Request, id string) {
 	if rec, err := a.store.GetRecord(r.Context(), id); err == nil && rec.ContentType == domain.ContentImage {
-		mimeType, data, err := domain.DecodeClipboardImage(rec.ContentText)
+		mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
 		if err != nil {
 			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "image data is invalid"})
 			return

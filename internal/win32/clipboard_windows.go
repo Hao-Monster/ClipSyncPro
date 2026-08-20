@@ -57,11 +57,10 @@ func ReadClipboard() (ClipboardSnapshot, error) {
 		}
 		mimeType := "image/png"
 		if format != registeredPNGFormat() {
-			data, err = clipboardBMPFromDIB(data)
+			data, err = clipboardPNGFromDIB(data)
 			if err != nil {
 				return ClipboardSnapshot{Sequence: seq}, err
 			}
-			mimeType = "image/bmp"
 		}
 		return ClipboardSnapshot{
 			Sequence:      seq,
@@ -174,7 +173,11 @@ func WriteClipboardText(text string) error {
 		return lastError(err, "EmptyClipboard failed")
 	}
 	data := append([]byte(nil), unsafe.Slice((*byte)(unsafe.Pointer(&utf16[0])), len(utf16)*2)...)
-	return setClipboardBytes(cfUnicodeText, data)
+	if err := setClipboardBytes(cfUnicodeText, data); err != nil {
+		return err
+	}
+	markClipboardWrite(ClipboardSequenceNumber())
+	return nil
 }
 
 func WriteClipboardImage(mimeType string, data []byte) error {
@@ -214,6 +217,7 @@ func WriteClipboardImage(mimeType string, data []byte) error {
 			return err
 		}
 	}
+	markClipboardWrite(ClipboardSequenceNumber())
 	return nil
 }
 
