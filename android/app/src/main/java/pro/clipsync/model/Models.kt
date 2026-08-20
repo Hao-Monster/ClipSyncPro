@@ -11,6 +11,16 @@ data class CipherText(
     val nonce: String,
     val ciphertext: String,
 ) {
+    fun toJson(): JSONObject {
+        return JSONObject()
+            .put("algorithm", algorithm)
+            .put("kdf", kdf)
+            .put("iterations", iterations)
+            .put("salt", salt)
+            .put("nonce", nonce)
+            .put("ciphertext", ciphertext)
+    }
+
     companion object {
         fun fromJson(json: JSONObject?): CipherText? {
             if (json == null) return null
@@ -43,7 +53,11 @@ data class ClipboardRecord(
     val syncStatus: String,
 ) {
     val summary: String
-        get() = if (isSensitive) "已加密账户密码记录" else contentText.orEmpty().replace("\n", " ").take(120)
+        get() = when {
+            isSensitive -> "已加密账户密码记录"
+            contentType == "image" -> "图片"
+            else -> contentText.orEmpty().replace("\n", " ").take(120)
+        }
 
     companion object {
         fun fromJson(json: JSONObject): ClipboardRecord {

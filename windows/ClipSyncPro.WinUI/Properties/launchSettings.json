@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ClipSyncPro.WinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "ClipSyncPro.WinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

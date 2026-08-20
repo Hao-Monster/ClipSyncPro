@@ -17,6 +17,7 @@ var (
 	ErrPasswordRequired  = errors.New("密码不能为空")
 	ErrRevealRequired    = errors.New("请先点击查看")
 	ErrSensitiveRequired = errors.New("仅账户/密码记录支持修改备注")
+	ErrTextRequired      = errors.New("图片不能标记为账户或密码")
 )
 
 type Service struct {
@@ -73,6 +74,21 @@ func (s *Service) CaptureText(ctx context.Context, content string) (domain.Clipb
 	return rec, nil
 }
 
+func (s *Service) CaptureImage(ctx context.Context, mimeType string, data []byte) (domain.ClipboardRecord, error) {
+	now := s.now()
+	rec, err := domain.NewClipboardImageRecord(s.userID, s.deviceID, s.platform, mimeType, data, now)
+	if err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	if err := s.store.UpsertRecord(ctx, rec); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	if err := s.enqueueRecord(ctx, storage.QueueCreate, rec); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	return rec, nil
+}
+
 func (s *Service) List(ctx context.Context, filter storage.Filter) ([]domain.ClipboardRecord, error) {
 	if filter.UserID == "" {
 		filter.UserID = s.userID
@@ -103,6 +119,9 @@ func (s *Service) markSensitive(ctx context.Context, id string, kind domain.Sens
 	rec, err := s.store.GetRecord(ctx, id)
 	if err != nil {
 		return domain.ClipboardRecord{}, err
+	}
+	if rec.ContentType == domain.ContentImage {
+		return domain.ClipboardRecord{}, ErrTextRequired
 	}
 	content := rec.ContentText
 	if rec.IsSensitive {

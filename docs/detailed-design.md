@@ -9,8 +9,8 @@ When a clipboard value is marked as `account`, that original clipboard value bec
 Important fields:
 
 - `id`: globally unique record id.
-- `content_type`: `text`, `url`, `number`, or `other`.
-- `content_text`: non-sensitive plaintext.
+- `content_type`: `text`, `url`, `number`, `image`, or `other`.
+- `content_text`: non-sensitive plaintext; images use a PNG/BMP base64 data URL so the existing database and sync contract stay compatible.
 - `content_cipher`: encrypted original sensitive clipboard content.
 - `account_cipher`, `password_cipher`, `remark_cipher`: encrypted sensitive fields.
 - `search_index`: keyed HMAC token hashes for sensitive search.
@@ -72,5 +72,7 @@ The Go MVP uses Win32 APIs directly for:
 - `SetClipboardData`
 - `RegisterHotKey`
 - `SendInput`
+
+PNG and packed DIB/DIBV5 clipboard images are normalized to PNG or BMP records. Copy/paste restores both standard DIB and PNG clipboard formats when possible. The Windows executables also maintain an idempotent `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry, which does not require elevation.
 
 `Alt + V` toggles the native Win32 client window. The default product entrypoint does not require a browser or embedded web view.

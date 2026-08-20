@@ -80,7 +80,7 @@ func RecordMatchesFilter(rec domain.ClipboardRecord, filter Filter) bool {
 	}
 	keyword := strings.ToLower(filter.Keyword)
 	if keyword != "" {
-		if !rec.IsSensitive && strings.Contains(strings.ToLower(rec.ContentText), keyword) {
+		if !rec.IsSensitive && rec.ContentType != domain.ContentImage && strings.Contains(strings.ToLower(rec.ContentText), keyword) {
 			return true
 		}
 		if rec.IsSensitive && domain.ContainsAll(rec.SearchIndex, filter.KeywordHashes) {

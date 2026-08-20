@@ -34,6 +34,17 @@ func PasteText(text string) error {
 	if err := WriteClipboardText(text); err != nil {
 		return err
 	}
+	return sendPasteShortcut()
+}
+
+func PasteImage(mimeType string, data []byte) error {
+	if err := WriteClipboardImage(mimeType, data); err != nil {
+		return err
+	}
+	return sendPasteShortcut()
+}
+
+func sendPasteShortcut() error {
 	time.Sleep(60 * time.Millisecond)
 	inputs := []input{
 		newKeyboardInput(vkControl, 0),

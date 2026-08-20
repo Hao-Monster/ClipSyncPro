@@ -17,6 +17,7 @@ const (
 	ContentText   ContentType = "text"
 	ContentURL    ContentType = "url"
 	ContentNumber ContentType = "number"
+	ContentImage  ContentType = "image"
 	ContentOther  ContentType = "other"
 )
 
@@ -202,6 +203,9 @@ func RedactedSummary(rec ClipboardRecord) string {
 		default:
 			return "已加密敏感记录"
 		}
+	}
+	if rec.ContentType == ContentImage {
+		return "图片"
 	}
 	const max = 120
 	text := strings.ReplaceAll(rec.ContentText, "\r\n", " ")

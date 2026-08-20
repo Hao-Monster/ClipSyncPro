@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"clipsyncpro/internal/agent"
+	"clipsyncpro/internal/autostart"
 	"clipsyncpro/internal/domain"
 	"clipsyncpro/internal/nativeui"
 	"clipsyncpro/internal/singleinstance"
@@ -21,6 +22,9 @@ func main() {
 		log.Fatalf("single instance lock failed: %v", err)
 	}
 	defer lock.Release()
+	if err := autostart.EnsureEnabled("ClipSyncPro"); err != nil {
+		log.Printf("enable startup failed: %v", err)
+	}
 	if alreadyRunning {
 		singleinstance.ActivateExistingWindow("ClipSyncProNativeWindow", "ClipSync Pro")
 		return

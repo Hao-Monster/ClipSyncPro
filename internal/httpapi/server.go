@@ -266,9 +266,11 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Native clients do not require CORS. Omitting ACAO prevents arbitrary web
+	// origins from reading a privately deployed user's clipboard history.
 	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
 
 func ListenAndServe(ctx context.Context, addr string, handler http.Handler) error {

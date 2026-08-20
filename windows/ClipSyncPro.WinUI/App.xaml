@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="ClipSyncPro_WinUI.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:ClipSyncPro_WinUI">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <!-- Other merged dictionaries here -->
+            </ResourceDictionary.MergedDictionaries>
+            <SolidColorBrush x:Key="TextControlBackground" Color="#2A000000" />
+            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#36000000" />
+            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#42000000" />
+            <SolidColorBrush x:Key="TextControlBorderBrush" Color="#24FFFFFF" />
+            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#32FFFFFF" />
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#70FFFFFF" />
+
+            <SolidColorBrush x:Key="ButtonBackground" Color="#26000000" />
+            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#22FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#34FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#18FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#28FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#38FFFFFF" />
+
+            <SolidColorBrush x:Key="ListViewItemBackground" Color="Transparent" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#14FFFFFF" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#1A000000" />
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#24FFFFFF" />
+            <SolidColorBrush x:Key="ListViewItemForeground" Color="#F2F5F7FA" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

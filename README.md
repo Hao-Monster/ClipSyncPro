@@ -5,7 +5,7 @@ ClipSync Pro is a private-deployment clipboard history and cross-device sync sys
 This repository currently contains a Go-based MVP foundation that can be built in the current workspace:
 
 - `cmd/clipsync-server`: HTTP sync server with record APIs and Server-Sent Events at the PRD-compatible `/ws/v1/sync` path.
-- `cmd/clipsync-windows`: native Windows client with clipboard polling, local MySQL storage, sync queue, `Alt + V` hotkey hook, and Win32 desktop UI.
+- `cmd/clipsync-windows`: native Windows client with text/image clipboard polling, local MySQL storage, sync queue, per-user autostart, `Alt + V` hotkey hook, and Win32 desktop UI.
 - `android`: native Android Kotlin client source with foreground clipboard service, server upload, record list, reveal, copy, and delete flows.
 - `internal/domain`: shared record and sync event model.
 - `internal/security`: AES-256-GCM encryption and keyed sensitive search indexes.
@@ -56,6 +56,8 @@ go run .\cmd\clipsync-windows
 ```
 
 The client opens a native Windows window. `Alt + V` toggles that window.
+
+On first launch, the Windows client registers itself in the current user's `Run` key. Clipboard images are captured as `image` records and can be viewed, copied, and pasted again from the WinUI client.
 
 Optional debug web UI for development remains available by calling `agent.Run` from a separate diagnostic entrypoint; it is not the product client.
 

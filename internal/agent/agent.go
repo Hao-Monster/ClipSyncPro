@@ -31,6 +31,7 @@ type Agent struct {
 	service *app.Service
 	sync    *syncer.Client
 	reveals revealCache
+	events  *httpapi.Hub
 }
 
 func New(store storage.Store, cfg Config) *Agent {
@@ -62,6 +63,7 @@ func New(store storage.Store, cfg Config) *Agent {
 		service: service,
 		sync:    syncClient,
 		reveals: newRevealCache(),
+		events:  httpapi.NewHub(),
 	}
 }
 
@@ -69,6 +71,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.StartBackground(ctx)
 	go a.runHotkey(ctx)
 	log.Printf("ClipSync Pro debug UI listening on http://%s", a.cfg.UIAddr)
+	return httpapi.ListenAndServe(ctx, a.cfg.UIAddr, a)
+}
+
+func (a *Agent) RunBridge(ctx context.Context) error {
+	a.StartBackground(ctx)
+	log.Printf("ClipSync Pro local UI bridge listening on http://%s", a.cfg.UIAddr)
 	return httpapi.ListenAndServe(ctx, a.cfg.UIAddr, a)
 }
 
@@ -93,7 +101,7 @@ func (a *Agent) runClipboardLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			snapshot, err := win32.ReadClipboardText()
+			snapshot, err := win32.ReadClipboard()
 			if err != nil {
 				continue
 			}
@@ -101,10 +109,10 @@ func (a *Agent) runClipboardLoop(ctx context.Context) {
 				continue
 			}
 			lastSeq = snapshot.Sequence
-			if !snapshot.HasText {
+			if !snapshot.HasText && !snapshot.HasImage {
 				continue
 			}
-			rec, err := a.service.CaptureText(ctx, snapshot.Text)
+			rec, err := a.captureSnapshot(ctx, snapshot)
 			if err != nil {
 				log.Printf("clipboard capture failed: %v", err)
 				continue
@@ -112,8 +120,21 @@ func (a *Agent) runClipboardLoop(ctx context.Context) {
 			if a.cfg.OnRecord != nil {
 				a.cfg.OnRecord(rec)
 			}
+			a.broadcastLocalEvent(domain.SyncEvent{
+				EventType: domain.EventRecordCreated,
+				Record:    &rec,
+				Occurred:  time.Now().UTC(),
+				DeviceID:  a.cfg.DeviceID,
+			})
 		}
 	}
+}
+
+func (a *Agent) captureSnapshot(ctx context.Context, snapshot win32.ClipboardSnapshot) (domain.ClipboardRecord, error) {
+	if snapshot.HasImage {
+		return a.service.CaptureImage(ctx, snapshot.ImageMIMEType, snapshot.ImageData)
+	}
+	return a.service.CaptureText(ctx, snapshot.Text)
 }
 
 func (a *Agent) runSyncLoop(ctx context.Context) {
@@ -157,6 +178,7 @@ func (a *Agent) runEventLoop(ctx context.Context) {
 			if a.cfg.OnRemoteEvent != nil {
 				a.cfg.OnRemoteEvent(event)
 			}
+			a.broadcastLocalEvent(event)
 			return nil
 		})
 		if ctx.Err() != nil {
@@ -167,6 +189,12 @@ func (a *Agent) runEventLoop(ctx context.Context) {
 		if backoff < 30*time.Second {
 			backoff *= 2
 		}
+	}
+}
+
+func (a *Agent) broadcastLocalEvent(event domain.SyncEvent) {
+	if a.events != nil {
+		a.events.Broadcast(event)
 	}
 }
 

@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="ClipSyncPro_WinUI.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:ClipSyncPro_WinUI"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Background="Transparent"
+    Loaded="Page_Loaded"
+    Unloaded="Page_Unloaded"
+    mc:Ignorable="d">
+
+    <Grid
+        Padding="18,14,18,14"
+        Background="Transparent"
+        RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox
+                x:Name="SearchBox"
+                Height="38"
+                FontSize="15"
+                KeyDown="SearchBox_KeyDown"
+                PlaceholderText="搜索剪贴内容、账户、密码或备注" />
+            <Button
+                Grid.Column="1"
+                MinWidth="92"
+                Click="RefreshButton_Click"
+                Content="刷新" />
+        </Grid>
+
+        <ScrollViewer
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Auto"
+            HorizontalScrollMode="Auto"
+            VerticalScrollBarVisibility="Disabled">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Click="AllButton_Click" Content="全部" />
+                <Button x:Name="SensitiveButton" Click="SensitiveButton_Click" Content="账户密码" />
+                <Button Click="BatchDeleteButton_Click" Content="批量删除" />
+                <Button Click="DateButton_Click" Content="按时间筛选" />
+                <Button Click="DeleteButton_Click" Content="删除" />
+                <Button Click="PasswordButton_Click" Content="密码" />
+                <Button Click="AccountButton_Click" Content="账户" />
+                <Button Click="ViewButton_Click" Content="查看" />
+                <Button Click="CopyButton_Click" Content="复制" />
+                <Button Click="PasteButton_Click" Content="输入" />
+                <Button Click="CaptureButton_Click" Content="捕获当前" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <ListView
+            x:Name="RecordsList"
+            Grid.Row="2"
+            Background="Transparent"
+            BorderThickness="0"
+            DoubleTapped="RecordsList_DoubleTapped"
+            IsItemClickEnabled="True"
+            KeyDown="RecordsList_KeyDown"
+            Padding="0"
+            SelectionChanged="RecordsList_SelectionChanged"
+            SelectionMode="Single">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="MinHeight" Value="54" />
+                    <Setter Property="Padding" Value="8,4" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+							<ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="148" />
+                        </Grid.ColumnDefinitions>
+						<Image
+							Width="{Binding ImagePreviewWidth}"
+							Height="42"
+							Source="{Binding ImageUrl}"
+							Stretch="UniformToFill" />
+                        <StackPanel Grid.Column="1" Spacing="3">
+                            <TextBlock
+                                FontFamily="Cascadia Mono, Consolas"
+                                FontSize="15"
+                                FontWeight="SemiBold"
+                                Text="{Binding Summary}"
+                                TextTrimming="CharacterEllipsis" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding KindLabel}" />
+                                <TextBlock
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding SourcePlatform}" />
+                                <TextBlock
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding SyncStatus}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <TextBlock
+							Grid.Column="2"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            FontFamily="Cascadia Mono, Consolas"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{Binding DisplayTime}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <Grid Grid.Row="3" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                x:Name="StatusText"
+                VerticalAlignment="Center"
+                FontSize="13"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="正在连接本地 agent..." />
+            <ProgressRing
+                x:Name="BusyRing"
+                Grid.Column="1"
+                Width="18"
+                Height="18"
+                IsActive="False" />
+        </Grid>
+    </Grid>
+</Page>
