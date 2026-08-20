@@ -99,6 +99,31 @@ func TestQueueRetryDelayIsCapped(t *testing.T) {
 	}
 }
 
+func TestMemoryQueuePrioritizesUntriedItemsOverDueRetries(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	failedID, err := store.Enqueue(t.Context(), SyncQueueItem{RecordID: "failed", Action: QueueCreate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkQueueRetry(t.Context(), failedID, "offline"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if _, err := store.Enqueue(t.Context(), SyncQueueItem{RecordID: "untried", Action: QueueCreate}); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(QueueRetryDelay(1))
+	items, err := store.ListPendingQueue(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].RecordID != "untried" {
+		t.Fatalf("queue selected %+v, want the untried item", items)
+	}
+}
+
 func TestMemoryStoreSummaryListOmitsImageBody(t *testing.T) {
 	store := NewMemoryStore()
 	rec, err := domain.NewClipboardImageRecord("local", "dev", domain.PlatformWindows, "image/png", []byte("large-image-body"), time.Now())

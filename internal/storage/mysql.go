@@ -141,6 +141,9 @@ func (s *MySQLStore) EnsureSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.ensureIndex(ctx, "sync_queue_v2", "idx_sync_queue_schedule", "(status, retry_count, next_attempt_at, created_at)"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -203,6 +206,24 @@ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, table).Scan(&count); err !=
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (s *MySQLStore) ensureIndex(ctx context.Context, table, index, definition string) error {
+	if !safeIdentifier(table) || !safeIdentifier(index) {
+		return errors.New("unsafe schema identifier")
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM information_schema.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`, table, index).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, "ALTER TABLE `"+table+"` ADD INDEX `"+index+"` "+definition)
+	return err
 }
 
 func (s *MySQLStore) UpsertRecord(ctx context.Context, rec domain.ClipboardRecord) error {
@@ -421,7 +442,7 @@ SELECT id, record_id, action, retry_count, status, last_error, next_attempt_at, 
 FROM sync_queue_v2
 WHERE status IN ('pending', 'failed')
   AND next_attempt_at <= ?
-ORDER BY created_at ASC
+ORDER BY retry_count ASC, next_attempt_at ASC, created_at ASC
 LIMIT ?`, time.Now(), limit)
 	if err != nil {
 		return nil, err

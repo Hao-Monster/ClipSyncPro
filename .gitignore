@@ -9,3 +9,5 @@ bin/
 obj/
 build/
 android/**/build/
+artifacts/
+backups/

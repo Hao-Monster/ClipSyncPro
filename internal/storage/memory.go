@@ -129,6 +129,12 @@ func (s *MemoryStore) ListPendingQueue(_ context.Context, limit int) ([]SyncQueu
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
+		if items[i].RetryCount != items[j].RetryCount {
+			return items[i].RetryCount < items[j].RetryCount
+		}
+		if !items[i].NextAttemptAt.Equal(items[j].NextAttemptAt) {
+			return items[i].NextAttemptAt.Before(items[j].NextAttemptAt)
+		}
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	if limit > 0 && len(items) > limit {

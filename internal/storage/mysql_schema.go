@@ -40,5 +40,6 @@ CREATE TABLE IF NOT EXISTS sync_queue_v2 (
     created_at DATETIME(3) NOT NULL,
     updated_at DATETIME(3) NOT NULL,
     UNIQUE INDEX uq_sync_queue_record (record_id),
-    INDEX idx_sync_queue_due (status, next_attempt_at, created_at)
+    INDEX idx_sync_queue_due (status, next_attempt_at, created_at),
+    INDEX idx_sync_queue_schedule (status, retry_count, next_attempt_at, created_at)
 );`
