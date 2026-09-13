@@ -37,6 +37,7 @@ public sealed partial class MainPage : Page
             _eventRefreshTimer.Tick += EventRefreshTimer_Tick;
         }
         await AgentLauncher.EnsureRunningAsync(_lifetime.Token);
+        _ = Task.Run(() => AgentLauncher.WatchAsync(_lifetime.Token));
         _ = Task.Run(() => WatchAgentEventsAsync(_lifetime.Token));
         await LoadRecordsAsync();
     }
@@ -69,9 +70,17 @@ public sealed partial class MainPage : Page
             }
             StatusText.Text = BuildStatus(status);
         }
+        catch (AgentRequestException ex) when (ex.StatusCode >= 500)
+        {
+            StatusText.Text = "Agent 已连接，但本地存储暂不可用，系统会自动重试。";
+        }
+        catch (HttpRequestException)
+        {
+            StatusText.Text = "本地 agent 未连接，系统会自动重试。";
+        }
         catch (Exception ex)
         {
-            StatusText.Text = "本地 agent 未连接: " + CleanError(ex.Message);
+            StatusText.Text = CleanError(ex.Message);
         }
         finally
         {

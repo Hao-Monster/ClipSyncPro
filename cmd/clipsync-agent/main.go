@@ -2,9 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -14,6 +19,9 @@ import (
 )
 
 func main() {
+	closeLog := configureLog()
+	defer closeLog()
+
 	lock, alreadyRunning, err := singleinstance.Acquire("Global\\ClipSyncProWindowsAgent")
 	if err != nil {
 		log.Fatalf("single instance lock failed: %v", err)
@@ -26,12 +34,6 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	store, err := storage.OpenMySQLFromEnv(ctx)
-	if err != nil {
-		log.Fatalf("open local MySQL failed: %v", err)
-	}
-	defer store.Close()
 
 	host, _ := os.Hostname()
 	deviceID := firstEnv("CLIPSYNC_DEVICE_ID")
@@ -51,17 +53,111 @@ func main() {
 		uiAddr = "127.0.0.1:37618"
 	}
 
-	background := agent.New(store, agent.Config{
+	if err := runWithStorageRetry(ctx, uiAddr, agent.Config{
 		UIAddr:       uiAddr,
 		ServerURL:    serverURL,
 		Secret:       secret,
 		UserID:       firstEnv("CLIPSYNC_USER_ID"),
 		DeviceID:     deviceID,
 		PollInterval: 250 * time.Millisecond,
-	})
-	if err := background.RunBridge(ctx); err != nil && ctx.Err() == nil {
+	}); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}
+}
+
+func runWithStorageRetry(ctx context.Context, uiAddr string, cfg agent.Config) error {
+	var degraded *http.Server
+	for {
+		store, err := storage.OpenMySQLFromEnv(ctx)
+		if err != nil {
+			log.Printf("open local MySQL failed: %v; retrying in 5s", err)
+			if degraded == nil {
+				server := &http.Server{
+					Addr:              uiAddr,
+					Handler:           degradedHandler{},
+					ReadHeaderTimeout: 5 * time.Second,
+				}
+				degraded = server
+				go func() {
+					if serveErr := server.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+						log.Printf("degraded local UI failed: %v", serveErr)
+					}
+				}()
+			}
+			select {
+			case <-ctx.Done():
+				if degraded != nil {
+					_ = degraded.Shutdown(context.Background())
+				}
+				return nil
+			case <-time.After(5 * time.Second):
+				continue
+			}
+		}
+
+		if degraded != nil {
+			_ = degraded.Shutdown(context.Background())
+			degraded = nil
+		}
+		background := agent.New(store, cfg)
+		runErr := background.RunBridge(ctx)
+		_ = store.Close()
+		if ctx.Err() != nil {
+			return nil
+		}
+		log.Printf("local agent stopped: %v; retrying in 2s", runErr)
+		time.Sleep(2 * time.Second)
+	}
+}
+
+type degradedHandler struct{}
+
+func (degradedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.URL.Path == "/api/status" {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":         "degraded",
+			"ui_api_version": "1",
+			"device_id":      "windows-local",
+			"user_id":        "local",
+			"ui_addr":        r.Host,
+			"storage_status": "unavailable",
+		})
+		return
+	}
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": "storage unavailable",
+		"code":  "storage_unavailable",
+	})
+}
+
+func configureLog() func() {
+	logDir := os.Getenv("CLIPSYNC_LOG_DIR")
+	if logDir == "" {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			return func() {}
+		}
+		logDir = filepath.Join(cacheDir, "ClipSync Pro")
+	}
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return func() {}
+	}
+	file, err := os.OpenFile(filepath.Join(logDir, "agent.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return func() {}
+	}
+	log.SetOutput(io.MultiWriter(os.Stderr, file))
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+	return func() { _ = file.Close() }
 }
 
 func firstEnv(keys ...string) string {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -158,7 +159,11 @@ func (a *Agent) handleRecords(w http.ResponseWriter, r *http.Request) {
 	}
 	records, err := a.service.List(r.Context(), filter)
 	if err != nil {
-		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		log.Printf("list records failed: %v", err)
+		writeAgentJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "storage unavailable",
+			"code":  "storage_unavailable",
+		})
 		return
 	}
 	views := make([]recordView, 0, len(records))

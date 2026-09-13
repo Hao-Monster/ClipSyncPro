@@ -124,13 +124,45 @@ public sealed class AgentClient
         {
             return;
         }
-        var message = await response.Content.ReadAsStringAsync(cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var message = body;
+        var errorCode = "";
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("error", out var error))
+            {
+                message = error.GetString() ?? message;
+            }
+            if (document.RootElement.TryGetProperty("code", out var code))
+            {
+                errorCode = code.GetString() ?? "";
+            }
+        }
+        catch (JsonException)
+        {
+            // Preserve the raw response for non-JSON failures.
+        }
         if (string.IsNullOrWhiteSpace(message))
         {
             message = response.ReasonPhrase ?? "Agent request failed.";
         }
-        throw new InvalidOperationException(message);
+        throw new AgentRequestException((int)response.StatusCode, errorCode, message);
     }
+}
+
+public sealed class AgentRequestException : InvalidOperationException
+{
+    public AgentRequestException(int statusCode, string errorCode, string message)
+        : base(message)
+    {
+        StatusCode = statusCode;
+        ErrorCode = errorCode;
+    }
+
+    public int StatusCode { get; }
+
+    public string ErrorCode { get; }
 }
 
 public sealed class AgentStatus
