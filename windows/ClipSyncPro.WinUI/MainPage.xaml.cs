@@ -106,11 +106,16 @@ public sealed partial class MainPage : Page
             using var cts = RequestTimeout();
             var status = await _client.StatusAsync(cts.Token);
             _offset = 0;
-            var records = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, 0, cts.Token);
+            var excludeFavorite = _currentView == MainViewMode.All;
+            var records = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, 0, cts.Token, excludeFavorite);
 
             _records.Clear();
             foreach (var record in records)
             {
+                if (excludeFavorite && record.IsFavorite)
+                {
+                    continue;
+                }
                 _records.Add(record);
             }
             StatusText.Text = BuildStatus(status);
@@ -344,6 +349,11 @@ public sealed partial class MainPage : Page
             {
                 _records.Remove(record);
             }
+            else if (_currentView == MainViewMode.All && nextState)
+            {
+                // 当内容已经被收藏之后，收藏内容不再出现在“全部”视图，立即从当前列表中平滑移除
+                _records.Remove(record);
+            }
 
             // 2. 标记抑制此记录随后 3 秒内的 SSE 全量重载，避免页面清空重刷
             SuppressRecordRefresh(record.Id);
@@ -358,6 +368,10 @@ public sealed partial class MainPage : Page
             // 若请求失败，回滚本地状态
             record.IsFavorite = !nextState;
             if (_favoriteOnly && !nextState)
+            {
+                _records.Insert(0, record);
+            }
+            else if (_currentView == MainViewMode.All && nextState)
             {
                 _records.Insert(0, record);
             }
@@ -935,8 +949,13 @@ public sealed partial class MainPage : Page
         try
         {
             using var cts = RequestTimeout();
-            var more = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, _offset + 10, cts.Token);
-            foreach (var r in more) _records.Add(r);
+            var excludeFavorite = _currentView == MainViewMode.All;
+            var more = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, _offset + 10, cts.Token, excludeFavorite);
+            foreach (var r in more)
+            {
+                if (excludeFavorite && r.IsFavorite) continue;
+                _records.Add(r);
+            }
             if (more.Count > 0) _offset += 10;
         }
         finally
@@ -952,8 +971,13 @@ public sealed partial class MainPage : Page
         try
         {
             using var cts = RequestTimeout();
-            var more = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, _offset + 10, cts.Token);
-            foreach (var r in more) _records.Add(r);
+            var excludeFavorite = _currentView == MainViewMode.All;
+            var more = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, _offset + 10, cts.Token, excludeFavorite);
+            foreach (var r in more)
+            {
+                if (excludeFavorite && r.IsFavorite) continue;
+                _records.Add(r);
+            }
             if (more.Count > 0) _offset += 10;
         }
         finally

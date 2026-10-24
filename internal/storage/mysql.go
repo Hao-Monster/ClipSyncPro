@@ -360,6 +360,9 @@ func (s *MySQLStore) listRecords(ctx context.Context, filter Filter, summariesOn
 	if filter.FavoriteOnly {
 		clauses = append(clauses, "is_favorite = 1")
 	}
+	if filter.ExcludeFavorite {
+		clauses = append(clauses, "is_favorite = 0")
+	}
 	if filter.DateStart != nil {
 		clauses = append(clauses, "client_created_at >= ?")
 		args = append(args, *filter.DateStart)

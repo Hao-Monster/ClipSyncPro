@@ -265,6 +265,27 @@ func TestAgentFavoriteFlowAndBatchDeleteProtection(t *testing.T) {
 		t.Fatalf("unexpected favorite filter result: %+v", favListResp)
 	}
 
+	// 2.5 按 exclude_favorite=true 筛选（全部视图不包含收藏内容）
+	exclRr := httptest.NewRecorder()
+	a.ServeHTTP(exclRr, httptest.NewRequest(http.MethodGet, "/api/records?exclude_favorite=true", nil))
+	if exclRr.Code != http.StatusOK {
+		t.Fatalf("list exclude_favorite records failed: %d", exclRr.Code)
+	}
+	var exclListResp struct {
+		Records []struct {
+			ID         string `json:"id"`
+			IsFavorite bool   `json:"is_favorite"`
+		} `json:"records"`
+	}
+	if err := json.NewDecoder(exclRr.Body).Decode(&exclListResp); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range exclListResp.Records {
+		if r.IsFavorite || r.ID == favRec.ID {
+			t.Fatalf("expected no favorite records in exclude_favorite filter, got %+v", r)
+		}
+	}
+
 	// 3. 批量删除并跳过收藏记录
 	batchBody := []byte(`{"ids":["` + normalRec.ID + `","` + favRec.ID + `"],"skip_favorite":true}`)
 	delRr := httptest.NewRecorder()

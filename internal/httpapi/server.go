@@ -189,12 +189,13 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) filterFromQuery(w http.ResponseWriter, r *http.Request) (storage.Filter, bool) {
 	q := r.URL.Query()
 	filter := storage.Filter{
-		UserID:        q.Get("user_id"),
-		Keyword:       strings.TrimSpace(q.Get("keyword")),
-		SensitiveOnly: q.Get("sensitive") == "true" || q.Get("sensitive") == "1",
-		FavoriteOnly:  q.Get("favorite") == "true" || q.Get("favorite") == "1",
-		Limit:         10,
-		Offset:        0,
+		UserID:          q.Get("user_id"),
+		Keyword:         strings.TrimSpace(q.Get("keyword")),
+		SensitiveOnly:   q.Get("sensitive") == "true" || q.Get("sensitive") == "1",
+		FavoriteOnly:    q.Get("favorite") == "true" || q.Get("favorite") == "1",
+		ExcludeFavorite: q.Get("exclude_favorite") == "true" || q.Get("exclude_favorite") == "1" || q.Get("unfavorite") == "true",
+		Limit:           10,
+		Offset:          0,
 	}
 	if raw := q.Get("offset"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {

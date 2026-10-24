@@ -17,11 +17,12 @@ type Filter struct {
 	KeywordHashes  []string
 	DateStart      *time.Time
 	DateEnd        *time.Time
-	SensitiveOnly  bool
-	FavoriteOnly   bool
-	IncludeDeleted bool
-	Limit          int
-	Offset         int
+	SensitiveOnly   bool
+	FavoriteOnly    bool
+	ExcludeFavorite bool
+	IncludeDeleted  bool
+	Limit           int
+	Offset          int
 }
 
 type QueueAction string
@@ -96,6 +97,9 @@ func RecordMatchesFilter(rec domain.ClipboardRecord, filter Filter) bool {
 		return false
 	}
 	if filter.FavoriteOnly && !rec.IsFavorite {
+		return false
+	}
+	if filter.ExcludeFavorite && rec.IsFavorite {
 		return false
 	}
 	if filter.DateStart != nil && rec.ClientCreatedAt.Before(*filter.DateStart) {

@@ -27,7 +27,7 @@ public sealed class AgentClient
         return await GetAsync<AgentStatus>("api/status", cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ClipboardRecordView>> ListAsync(string keyword, string date, bool sensitiveOnly, bool favoriteOnly, int offset, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ClipboardRecordView>> ListAsync(string keyword, string date, bool sensitiveOnly, bool favoriteOnly, int offset, CancellationToken cancellationToken, bool excludeFavorite = false)
     {
         var query = new List<string>();
         if (!string.IsNullOrWhiteSpace(keyword))
@@ -45,6 +45,10 @@ public sealed class AgentClient
         if (favoriteOnly)
         {
             query.Add("favorite=true");
+        }
+        if (excludeFavorite)
+        {
+            query.Add("exclude_favorite=true");
         }
         query.Add("offset=" + offset);
         var suffix = query.Count == 0 ? "" : "?" + string.Join("&", query);

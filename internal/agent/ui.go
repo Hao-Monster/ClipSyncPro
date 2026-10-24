@@ -214,11 +214,12 @@ func (a *Agent) handleRecords(w http.ResponseWriter, r *http.Request) {
 func (a *Agent) filterFromRequest(w http.ResponseWriter, r *http.Request) (storage.Filter, bool) {
 	q := r.URL.Query()
 	filter := storage.Filter{
-		Keyword:       strings.TrimSpace(q.Get("keyword")),
-		SensitiveOnly: q.Get("sensitive") == "true",
-		FavoriteOnly:  q.Get("favorite") == "true",
-		Limit:         10,
-		Offset:        0,
+		Keyword:         strings.TrimSpace(q.Get("keyword")),
+		SensitiveOnly:   q.Get("sensitive") == "true",
+		FavoriteOnly:    q.Get("favorite") == "true",
+		ExcludeFavorite: q.Get("exclude_favorite") == "true" || q.Get("unfavorite") == "true",
+		Limit:           10,
+		Offset:          0,
 	}
 	if rawOffset := q.Get("offset"); rawOffset != "" {
 		offset, err := strconv.Atoi(rawOffset)
