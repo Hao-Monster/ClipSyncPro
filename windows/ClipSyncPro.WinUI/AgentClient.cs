@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -110,6 +112,11 @@ public sealed class AgentClient
     public Task CopyAsync(string id, string field, CancellationToken cancellationToken)
     {
         return PostNoContentAsync($"api/records/{Uri.EscapeDataString(id)}/copy", new { field }, cancellationToken);
+    }
+
+    public Task PasteAsync(string id, string field, CancellationToken cancellationToken)
+    {
+        return PasteAsync(id, field, 0, cancellationToken);
     }
 
     public Task PasteAsync(string id, string field, ulong targetHwnd, CancellationToken cancellationToken)
@@ -228,8 +235,15 @@ public sealed class RecordsResponse
     public List<ClipboardRecordView> Records { get; set; } = [];
 }
 
-public sealed class ClipboardRecordView
+public sealed class ClipboardRecordView : INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 
@@ -245,8 +259,24 @@ public sealed class ClipboardRecordView
     [JsonPropertyName("is_sensitive")]
     public bool IsSensitive { get; set; }
 
+    private bool _isFavorite;
+
     [JsonPropertyName("is_favorite")]
-    public bool IsFavorite { get; set; }
+    public bool IsFavorite
+    {
+        get => _isFavorite;
+        set
+        {
+            if (_isFavorite != value)
+            {
+                _isFavorite = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsFavoriteGlyph));
+                OnPropertyChanged(nameof(IsFavoriteBrush));
+                OnPropertyChanged(nameof(StarToolTip));
+            }
+        }
+    }
 
     [JsonPropertyName("favorite_at")]
     public DateTime? FavoriteAt { get; set; }

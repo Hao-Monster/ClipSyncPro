@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
@@ -41,6 +43,13 @@ public sealed partial class MainPage : Page
     private string _promptCategory = "";
     private int _offset;
     private bool _loadingMore;
+
+    private readonly ConcurrentDictionary<string, DateTime> _suppressedEventRecordIds = new();
+
+    private void SuppressRecordRefresh(string recordId)
+    {
+        _suppressedEventRecordIds[recordId] = DateTime.UtcNow.AddSeconds(3);
+    }
 
     public MainPage()
     {
@@ -96,7 +105,8 @@ public sealed partial class MainPage : Page
         {
             using var cts = RequestTimeout();
             var status = await _client.StatusAsync(cts.Token);
-            var records = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, _offset, cts.Token);
+            _offset = 0;
+            var records = await _client.ListAsync(SearchBox.Text, _date, _sensitiveOnly, _favoriteOnly, 0, cts.Token);
 
             _records.Clear();
             foreach (var record in records)
@@ -104,6 +114,10 @@ public sealed partial class MainPage : Page
                 _records.Add(record);
             }
             StatusText.Text = BuildStatus(status);
+            if (_records.Count > 0)
+            {
+                RecordsList.ScrollIntoView(_records[0]);
+            }
         }
         catch (AgentRequestException ex) when (ex.StatusCode >= 500)
         {
@@ -166,7 +180,36 @@ public sealed partial class MainPage : Page
                     var line = await reader.ReadLineAsync(cancellationToken);
                     if (line?.StartsWith("data: ", StringComparison.Ordinal) == true)
                     {
-                        QueueEventRefresh();
+                        var shouldSkip = false;
+                        var payload = line.Substring(6).Trim();
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(payload);
+                            if (doc.RootElement.TryGetProperty("record_id", out var rIdProp))
+                            {
+                                var rId = rIdProp.GetString();
+                                if (!string.IsNullOrEmpty(rId) && _suppressedEventRecordIds.TryGetValue(rId, out var expireAt))
+                                {
+                                    if (DateTime.UtcNow <= expireAt)
+                                    {
+                                        shouldSkip = true;
+                                    }
+                                    else
+                                    {
+                                        _suppressedEventRecordIds.TryRemove(rId, out _);
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // 忽略心跳或非 JSON 数据，回退正常处理
+                        }
+
+                        if (!shouldSkip)
+                        {
+                            QueueEventRefresh();
+                        }
                     }
                 }
             }
@@ -290,37 +333,45 @@ public sealed partial class MainPage : Page
 
     #region Record Star & Actions
 
+    private async Task ToggleFavoriteRecordAsync(ClipboardRecordView record)
+    {
+        var nextState = !record.IsFavorite;
+        try
+        {
+            // 1. 本地模型即时原地更新，触发 INotifyPropertyChanged，星标平滑变化，无任何抖动
+            record.IsFavorite = nextState;
+            if (_favoriteOnly && !nextState)
+            {
+                _records.Remove(record);
+            }
+
+            // 2. 标记抑制此记录随后 3 秒内的 SSE 全量重载，避免页面清空重刷
+            SuppressRecordRefresh(record.Id);
+
+            // 3. 异步提交到本地 Agent 持久化
+            using var cts = RequestTimeout();
+            await _client.SetFavoriteAsync(record.Id, nextState, cts.Token);
+            StatusText.Text = nextState ? "已添加至收藏夹" : "已从收藏夹移除";
+        }
+        catch (Exception ex)
+        {
+            // 若请求失败，回滚本地状态
+            record.IsFavorite = !nextState;
+            if (_favoriteOnly && !nextState)
+            {
+                _records.Insert(0, record);
+            }
+            StatusText.Text = CleanError(ex.Message);
+        }
+    }
+
     private async void RecordStarButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.DataContext is not ClipboardRecordView record)
         {
             return;
         }
-        var nextState = !record.IsFavorite;
-        try
-        {
-            using var cts = RequestTimeout();
-            await _client.SetFavoriteAsync(record.Id, nextState, cts.Token);
-            record.IsFavorite = nextState;
-            if (_favoriteOnly && !nextState)
-            {
-                _records.Remove(record);
-            }
-            else
-            {
-                // 刷新项状态显示
-                var idx = _records.IndexOf(record);
-                if (idx >= 0)
-                {
-                    _records[idx] = record;
-                }
-            }
-            StatusText.Text = nextState ? "已添加至收藏夹" : "已从收藏夹移除";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = CleanError(ex.Message);
-        }
+        await ToggleFavoriteRecordAsync(record);
     }
 
     private async void RecordConvertToPrompt_Click(object sender, RoutedEventArgs e)
@@ -361,17 +412,199 @@ public sealed partial class MainPage : Page
         await LoadRecordsAsync();
     }
 
+    private async void DeleteButton_Click(object sender, RoutedEventArgs e)
+    {
+        var record = SelectedOrNull();
+        if (record is null)
+        {
+            return;
+        }
+        if (record.IsSensitive)
+        {
+            var ok = await ConfirmAsync("删除", $"该内容已设置为{record.KindLabel}，确定删除吗？");
+            if (!ok)
+            {
+                return;
+            }
+        }
+        await RunAgentActionAsync(async token => await _client.DeleteAsync(record.Id, token));
+        await LoadRecordsAsync();
+    }
+
+    private async void PasswordButton_Click(object sender, RoutedEventArgs e)
+    {
+        var record = SelectedOrNull();
+        if (record is null)
+        {
+            return;
+        }
+        if (record.IsImage)
+        {
+            StatusText.Text = "图片不能标记为账户或密码";
+            return;
+        }
+        var input = await PromptSensitiveAsync("密码", "账户", "", allowGenerate: false);
+        if (input is null)
+        {
+            return;
+        }
+        await RunAgentActionAsync(async token => await _client.MarkPasswordAsync(record.Id, input.Value, input.Remark, token));
+        await LoadRecordsAsync();
+    }
+
+    private async void AccountButton_Click(object sender, RoutedEventArgs e)
+    {
+        var record = SelectedOrNull();
+        if (record is null)
+        {
+            return;
+        }
+        if (record.IsImage)
+        {
+            StatusText.Text = "图片不能标记为账户或密码";
+            return;
+        }
+        var input = await PromptSensitiveAsync("账户", "密码", GeneratePassword(), allowGenerate: true);
+        if (input is null)
+        {
+            return;
+        }
+        await RunAgentActionAsync(async token => await _client.MarkAccountAsync(record.Id, input.Value, input.Remark, token));
+        await LoadRecordsAsync();
+    }
+
+    private async void ViewButton_Click(object sender, RoutedEventArgs e)
+    {
+        var record = SelectedOrNull();
+        if (record is null)
+        {
+            return;
+        }
+        await ShowRecordAsync(record);
+    }
+
+    private async void CopyButton_Click(object sender, RoutedEventArgs e)
+    {
+        var record = SelectedOrNull();
+        if (record is null)
+        {
+            return;
+        }
+        var field = await SelectFieldAsync(record, defaultField: record.SensitiveType == "account" ? "account" : "password");
+        if (field is null)
+        {
+            return;
+        }
+        await RunAgentActionAsync(async token => await _client.CopyAsync(record.Id, field, token));
+    }
+
+    private async void PasteButton_Click(object sender, RoutedEventArgs e)
+    {
+        await PasteSelectedAsync();
+    }
+
+    private ulong GetPasteTargetHandle()
+    {
+        if (App.Current is App app && app.MainWindow is MainWindow mw)
+        {
+            mw.FocusPasteTarget();
+            return mw.PasteTargetHandle;
+        }
+        return 0;
+    }
+
+    private async Task PasteSelectedAsync()
+    {
+        var record = SelectedOrNull();
+        if (record is null)
+        {
+            return;
+        }
+        var field = await SelectFieldAsync(record, defaultField: record.SensitiveType == "account" ? "account" : "password");
+        if (field is null)
+        {
+            return;
+        }
+        var targetHwnd = GetPasteTargetHandle();
+        await RunAgentActionAsync(async token => await _client.PasteAsync(record.Id, field, targetHwnd, token));
+    }
+
+    private void RecordGrid_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        EnsureTargetSelected(sender);
+    }
+
+    private void RecordContextMenu_Copy_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        CopyButton_Click(sender, e);
+    }
+
+    private void RecordContextMenu_Paste_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        PasteButton_Click(sender, e);
+    }
+
+    private void RecordContextMenu_View_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        ViewButton_Click(sender, e);
+    }
+
+    private async void RecordContextMenu_ToggleFavorite_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        var record = SelectedOrNull();
+        if (record is null) return;
+        await ToggleFavoriteRecordAsync(record);
+    }
+
+    private void RecordContextMenu_ConvertToPrompt_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        RecordConvertToPrompt_Click(sender, e);
+    }
+
+    private void RecordContextMenu_Password_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        PasswordButton_Click(sender, e);
+    }
+
+    private void RecordContextMenu_Account_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        AccountButton_Click(sender, e);
+    }
+
+    private void RecordContextMenu_Delete_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureTargetSelected(sender);
+        DeleteButton_Click(sender, e);
+    }
+
+    private void EnsureTargetSelected(object sender)
+    {
+        if (sender is FrameworkElement fe && fe.DataContext is ClipboardRecordView record)
+        {
+            _selected = record;
+            RecordsList.SelectedItem = record;
+        }
+    }
+
     private void RecordsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _selected = RecordsList.SelectedItem as ClipboardRecordView;
+        if (_selected is not null)
+        {
+            StatusText.Text = "已选择: " + ShortId(_selected.Id);
+        }
     }
 
     private async void RecordsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (_selected is not null)
-        {
-            await CopyRecordAsync(_selected);
-        }
+        await PasteSelectedAsync();
     }
 
     private async void RecordsList_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -382,18 +615,19 @@ public sealed partial class MainPage : Page
         }
         if (e.Key == VirtualKey.Enter)
         {
-            await CopyRecordAsync(_selected);
             e.Handled = true;
+            CopyButton_Click(sender, e);
+        }
+        else if (e.Key == VirtualKey.Delete)
+        {
+            e.Handled = true;
+            DeleteButton_Click(sender, e);
         }
         else if (e.Key == VirtualKey.S)
         {
             // S 键一键标星
-            var next = !_selected.IsFavorite;
-            await _client.SetFavoriteAsync(_selected.Id, next, CancellationToken.None);
-            _selected.IsFavorite = next;
-            var idx = _records.IndexOf(_selected);
-            if (idx >= 0) _records[idx] = _selected;
             e.Handled = true;
+            await ToggleFavoriteRecordAsync(_selected);
         }
     }
 
@@ -850,5 +1084,207 @@ public sealed partial class MainPage : Page
         return result == ContentDialogResult.Primary ? box.Text : null;
     }
 
+    private async Task ShowRecordAsync(ClipboardRecordView record)
+    {
+        if (record.IsImage)
+        {
+            if (!Uri.TryCreate(record.ImageUrl, UriKind.Absolute, out var imageUri))
+            {
+                StatusText.Text = "图片地址无效";
+                return;
+            }
+            var image = new Image
+            {
+                Source = new BitmapImage(imageUri),
+                MaxWidth = 760,
+                MaxHeight = 540,
+                Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform
+            };
+            var imageDialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "查看图片",
+                Content = new ScrollViewer { Content = image },
+                PrimaryButtonText = "确定",
+                DefaultButton = ContentDialogButton.Primary
+            };
+            await imageDialog.ShowAsync();
+            return;
+        }
+        using var cts = RequestTimeout();
+        var revealed = await _client.RevealAsync(record.Id, cts.Token);
+        if (!record.IsSensitive)
+        {
+            await ShowMessageAsync("查看", revealed.Content);
+            return;
+        }
+
+        var accountBox = ReadonlyTextBox(revealed.Account);
+        var passwordBox = ReadonlyTextBox(revealed.Password);
+        var remarkBox = new TextBox
+        {
+            Text = revealed.Remark,
+            AcceptsReturn = true,
+            MinHeight = 70,
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(FieldWithCopy("账户", accountBox, async () => await RunAgentActionAsync(async token => await _client.CopyAsync(record.Id, "account", token))));
+        panel.Children.Add(FieldWithCopy("密码", passwordBox, async () => await RunAgentActionAsync(async token => await _client.CopyAsync(record.Id, "password", token))));
+        panel.Children.Add(new TextBlock { Text = "备注", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        panel.Children.Add(remarkBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "查看",
+            Content = panel,
+            PrimaryButtonText = "确定",
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Primary
+        };
+        dialog.Closing += async (_, args) =>
+        {
+            if (remarkBox.Text == revealed.Remark)
+            {
+                return;
+            }
+            var deferral = args.GetDeferral();
+            try
+            {
+                using var saveCts = RequestTimeout();
+                await _client.UpdateRemarkAsync(record.Id, remarkBox.Text, saveCts.Token);
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        };
+        await dialog.ShowAsync();
+        await LoadRecordsAsync();
+    }
+
+    private static FrameworkElement FieldWithCopy(string label, TextBox valueBox, Func<Task> copy)
+    {
+        var grid = new Grid { ColumnSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var stack = new StackPanel { Spacing = 4 };
+        stack.Children.Add(new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        stack.Children.Add(valueBox);
+        var button = new Button { Content = "复制", MinWidth = 64, VerticalAlignment = VerticalAlignment.Bottom };
+        button.Click += async (_, _) => await copy();
+        Grid.SetColumn(button, 1);
+        grid.Children.Add(stack);
+        grid.Children.Add(button);
+        return grid;
+    }
+
+    private static TextBox ReadonlyTextBox(string text)
+    {
+        return new TextBox
+        {
+            Text = text,
+            IsReadOnly = true,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas")
+        };
+    }
+
+    private async Task<SensitiveInput?> PromptSensitiveAsync(string title, string valueLabel, string defaultValue, bool allowGenerate)
+    {
+        var valueBox = new TextBox
+        {
+            Text = defaultValue,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas")
+        };
+        var remarkBox = new TextBox { PlaceholderText = "备注" };
+        var panel = new StackPanel { Spacing = 10 };
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock { Text = valueLabel, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        if (allowGenerate)
+        {
+            var generate = new Button { Content = "生成密码" };
+            generate.Click += (_, _) => valueBox.Text = GeneratePassword();
+            Grid.SetColumn(generate, 1);
+            header.Children.Add(generate);
+        }
+        panel.Children.Add(header);
+        panel.Children.Add(valueBox);
+        panel.Children.Add(new TextBlock { Text = "备注", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        panel.Children.Add(remarkBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = panel,
+            PrimaryButtonText = "确定",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary
+        };
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary
+            ? new SensitiveInput(valueBox.Text, remarkBox.Text)
+            : null;
+    }
+
+    private async Task ShowMessageAsync(string title, string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas")
+            },
+            PrimaryButtonText = "确定",
+            DefaultButton = ContentDialogButton.Primary
+        };
+        await dialog.ShowAsync();
+    }
+
+    private static string ShortId(string id)
+    {
+        return id.Length <= 22 ? id : id[..22] + "...";
+    }
+
+    private static string GeneratePassword()
+    {
+        const string upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+        const string lower = "abcdefghijkmnopqrstuvwxyz";
+        const string digits = "23456789";
+        const string symbols = "!@#$%^&*()-_=+[]{};:,.?";
+        var classes = new[] { upper, lower, digits, symbols };
+        var all = string.Concat(classes);
+        var chars = new char[20];
+        for (var i = 0; i < classes.Length; i++)
+        {
+            chars[i] = Pick(classes[i]);
+        }
+        for (var i = classes.Length; i < chars.Length; i++)
+        {
+            chars[i] = Pick(all);
+        }
+        for (var i = chars.Length - 1; i > 0; i--)
+        {
+            var j = RandomNumberGenerator.GetInt32(i + 1);
+            (chars[i], chars[j]) = (chars[j], chars[i]);
+        }
+        return new string(chars);
+
+        static char Pick(string alphabet)
+        {
+            return alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
+        }
+    }
+
     #endregion
 }
+
+public sealed record SensitiveInput(string Value, string Remark);
