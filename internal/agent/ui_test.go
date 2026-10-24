@@ -346,3 +346,46 @@ func TestAgentPromptTemplatesFlow(t *testing.T) {
 	}
 }
 
+func TestAgentFavoriteEnqueuesSyncUpdate(t *testing.T) {
+	store := storage.NewMemoryStore()
+	a := New(store, Config{DeviceID: "dev-1"})
+	rec, err := a.Service().CaptureText(context.Background(), "favorite me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := store.ListPendingQueue(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range queued {
+		if err := store.MarkQueueDone(context.Background(), item.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	a.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/records/"+rec.ID+"/favorite", bytes.NewReader([]byte(`{"is_favorite":true}`))))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("favorite status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	stored, err := store.GetRecord(context.Background(), rec.ID)
+	if err != nil || !stored.IsFavorite {
+		t.Fatalf("record not favorited: %+v, err=%v", stored, err)
+	}
+	items, err := store.ListPendingQueue(context.Background(), 10)
+	if err != nil || len(items) != 1 || items[0].RecordID != rec.ID || items[0].Action != storage.QueueUpdate {
+		t.Fatalf("expected one queued update for favorite toggle, got %+v, err=%v", items, err)
+	}
+
+	rr = httptest.NewRecorder()
+	a.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/records/missing/favorite", bytes.NewReader([]byte(`{"is_favorite":true}`))))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing record favorite status = %d, want 404", rr.Code)
+	}
+
+	rr = httptest.NewRecorder()
+	a.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/prompts/missing/use", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing prompt use status = %d, want 404", rr.Code)
+	}
+}

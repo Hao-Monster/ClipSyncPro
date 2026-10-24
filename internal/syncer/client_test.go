@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,9 +10,64 @@ import (
 	"testing"
 	"time"
 
+	"clipsyncpro/internal/app"
 	"clipsyncpro/internal/domain"
+	"clipsyncpro/internal/httpapi"
 	"clipsyncpro/internal/storage"
 )
+
+func TestFavoriteToggleSyncsThroughDurableQueue(t *testing.T) {
+	local := storage.NewMemoryStore()
+	remote := storage.NewMemoryStore()
+	server := httptest.NewServer(httpapi.NewServer(remote, ""))
+	defer server.Close()
+
+	service := app.NewService(local, app.Config{UserID: "local", DeviceID: "dev-1", Platform: domain.PlatformWindows})
+	rec, err := service.CaptureText(t.Context(), "keep me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(server.URL)
+	if err := client.FlushQueue(t.Context(), local, 10, DefaultQueueBatchBytes); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.SetFavorite(t.Context(), rec.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	items, err := local.ListPendingQueue(t.Context(), 10)
+	if err != nil || len(items) != 1 || items[0].Action != storage.QueueUpdate || items[0].RecordID != rec.ID {
+		t.Fatalf("favorite toggle must enqueue update: %+v, err=%v", items, err)
+	}
+	if err := client.FlushQueue(t.Context(), local, 10, DefaultQueueBatchBytes); err != nil {
+		t.Fatal(err)
+	}
+	remoteRec, err := remote.GetRecord(t.Context(), rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !remoteRec.IsFavorite || remoteRec.FavoriteAt == nil {
+		t.Fatalf("remote favorite not synced: is_favorite=%v favorite_at=%v", remoteRec.IsFavorite, remoteRec.FavoriteAt)
+	}
+
+	if _, err := service.SetFavorite(t.Context(), rec.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.FlushQueue(t.Context(), local, 10, DefaultQueueBatchBytes); err != nil {
+		t.Fatal(err)
+	}
+	remoteRec, err = remote.GetRecord(t.Context(), rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remoteRec.IsFavorite || remoteRec.FavoriteAt != nil {
+		t.Fatalf("remote unfavorite not synced: is_favorite=%v favorite_at=%v", remoteRec.IsFavorite, remoteRec.FavoriteAt)
+	}
+
+	if _, err := service.SetFavorite(t.Context(), "missing", true); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("missing record err = %v, want ErrNotFound", err)
+	}
+}
 
 func TestFlushQueueMaterializesLatestRecordWithoutStoredPayload(t *testing.T) {
 	store := storage.NewMemoryStore()
@@ -121,5 +177,79 @@ func TestPushRecordConvertsBinaryImageOnlyAtWireBoundary(t *testing.T) {
 	defer server.Close()
 	if _, err := NewClient(server.URL).PushRecord(t.Context(), rec); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestClientSetFavorite(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/clipboard/records/rec-123/favorite" || r.Method != http.MethodPost {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			IsFavorite bool `json:"is_favorite"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if !body.IsFavorite {
+			t.Errorf("expected is_favorite=true, got %v", body.IsFavorite)
+		}
+		called = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if err := client.SetFavorite(t.Context(), "rec-123", true); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("expected handler to be called")
+	}
+}
+
+func TestClientPromptsMethods(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/clipboard/prompts" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"prompts":[{"id":"p1","title":"Prompt 1","category":"代码","template_content":"Code: {clip}","variables":["clip"]}]}`))
+		case r.URL.Path == "/api/v1/clipboard/prompts" && r.Method == http.MethodPost:
+			var p domain.PromptTemplate
+			_ = json.NewDecoder(r.Body).Decode(&p)
+			p.ID = "p2"
+			_ = json.NewEncoder(w).Encode(p)
+		case r.URL.Path == "/api/v1/clipboard/prompts/p1/use" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"status":"recorded"}`))
+		case r.URL.Path == "/api/v1/clipboard/prompts/p1" && r.Method == http.MethodDelete:
+			_, _ = w.Write([]byte(`{"status":"deleted"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+
+	// List
+	list, err := client.ListPrompts(t.Context(), "代码", "")
+	if err != nil || len(list) != 1 || list[0].Title != "Prompt 1" {
+		t.Fatalf("unexpected list: %+v, err=%v", list, err)
+	}
+
+	// Save
+	saved, err := client.SavePrompt(t.Context(), &domain.PromptTemplate{Title: "New Prompt", TemplateContent: "Hi {name}"})
+	if err != nil || saved.ID != "p2" {
+		t.Fatalf("unexpected save: %+v, err=%v", saved, err)
+	}
+
+	// Use
+	if err := client.UsePrompt(t.Context(), "p1"); err != nil {
+		t.Fatalf("unexpected use error: %v", err)
+	}
+
+	// Delete
+	if err := client.DeletePrompt(t.Context(), "p1"); err != nil {
+		t.Fatalf("unexpected delete error: %v", err)
 	}
 }

@@ -254,13 +254,19 @@ func (s *MemoryStore) SavePrompt(_ context.Context, prompt *domain.PromptTemplat
 		newP := domain.NewPromptTemplate(prompt.Title, prompt.Category, prompt.TemplateContent, prompt.Shortcut)
 		newP.IsFavorite = prompt.IsFavorite
 		*prompt = *newP
+	} else if existing, ok := s.prompts[prompt.ID]; ok {
+		// 编辑已有模板时保留使用次数与创建时间，避免客户端提交旧值覆盖。
+		prompt.UsageCount = existing.UsageCount
+		prompt.CreatedAt = existing.CreatedAt
 	}
 	prompt.UpdatedAt = s.now()
 	if prompt.CreatedAt.IsZero() {
 		prompt.CreatedAt = prompt.UpdatedAt
 	}
 	prompt.Variables = domain.ExtractVariables(prompt.TemplateContent)
-	s.prompts[prompt.ID] = prompt
+	stored := *prompt
+	stored.Variables = append([]string(nil), prompt.Variables...)
+	s.prompts[prompt.ID] = &stored
 	return nil
 }
 

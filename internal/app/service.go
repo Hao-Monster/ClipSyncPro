@@ -251,6 +251,21 @@ func (s *Service) UpdateRemark(ctx context.Context, id, remark string) (domain.C
 	return rec, nil
 }
 
+// SetFavorite 更新收藏状态并写入持久化同步队列，保证离线切换收藏后仍能最终同步到服务端与其他设备。
+func (s *Service) SetFavorite(ctx context.Context, id string, isFavorite bool) (domain.ClipboardRecord, error) {
+	if err := s.store.SetFavorite(ctx, id, isFavorite); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	rec, err := s.store.GetRecord(ctx, id)
+	if err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	if err := s.enqueueRecord(ctx, storage.QueueUpdate, rec); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	return rec, nil
+}
+
 func (s *Service) Delete(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil

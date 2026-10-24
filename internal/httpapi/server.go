@@ -56,6 +56,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleList(w, r)
 	case path == "/api/v1/clipboard/records/batch-delete" && r.Method == http.MethodPost:
 		s.handleBatchDelete(w, r)
+	case strings.HasSuffix(path, "/favorite") && strings.HasPrefix(path, "/api/v1/clipboard/records/") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/clipboard/records/"), "/favorite")
+		s.handleSetFavorite(w, r, id)
+	case path == "/api/v1/clipboard/prompts" && r.Method == http.MethodGet:
+		s.handleListPrompts(w, r)
+	case path == "/api/v1/clipboard/prompts" && r.Method == http.MethodPost:
+		s.handleSavePrompt(w, r)
+	case strings.HasPrefix(path, "/api/v1/clipboard/prompts/") && strings.HasSuffix(path, "/use") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/clipboard/prompts/"), "/use")
+		s.handleUsePrompt(w, r, id)
+	case strings.HasPrefix(path, "/api/v1/clipboard/prompts/") && r.Method == http.MethodDelete:
+		id := strings.TrimPrefix(path, "/api/v1/clipboard/prompts/")
+		s.handleDeletePrompt(w, r, id)
 	case strings.HasPrefix(path, "/api/v1/clipboard/records/") && r.Method == http.MethodGet:
 		id := strings.TrimPrefix(path, "/api/v1/clipboard/records/")
 		s.handleGet(w, r, id)
@@ -158,6 +171,7 @@ func (s *Server) filterFromQuery(w http.ResponseWriter, r *http.Request) (storag
 		UserID:        q.Get("user_id"),
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		SensitiveOnly: q.Get("sensitive") == "true" || q.Get("sensitive") == "1",
+		FavoriteOnly:  q.Get("favorite") == "true" || q.Get("favorite") == "1",
 		Limit:         10,
 		Offset:        0,
 	}
@@ -205,25 +219,126 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, id string)
 func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var body struct {
-		IDs []string `json:"ids"`
+		IDs          []string `json:"ids"`
+		SkipFavorite bool     `json:"skip_favorite"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if err := s.store.DeleteRecords(r.Context(), body.IDs); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})
+	ids := body.IDs
+	skipped := 0
+	if body.SkipFavorite {
+		var toDelete []string
+		for _, id := range ids {
+			rec, err := s.store.GetRecord(r.Context(), id)
+			if err == nil && rec.IsFavorite {
+				skipped++
+				continue
+			}
+			toDelete = append(toDelete, id)
+		}
+		ids = toDelete
+	}
+	if len(ids) > 0 {
+		if err := s.store.DeleteRecords(r.Context(), ids); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})
+			return
+		}
+		now := s.now().UTC()
+		for _, id := range ids {
+			s.hub.Broadcast(domain.SyncEvent{
+				EventType: domain.EventRecordDeleted,
+				RecordID:  id,
+				Occurred:  now,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "count": len(ids), "skipped": skipped})
+}
+
+func (s *Server) handleSetFavorite(w http.ResponseWriter, r *http.Request, id string) {
+	defer r.Body.Close()
+	var body struct {
+		IsFavorite bool `json:"is_favorite"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := s.store.SetFavorite(r.Context(), id, body.IsFavorite); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "favorite update failed"})
 		return
 	}
 	now := s.now().UTC()
-	for _, id := range body.IDs {
-		s.hub.Broadcast(domain.SyncEvent{
-			EventType: domain.EventRecordDeleted,
-			RecordID:  id,
-			Occurred:  now,
-		})
+	s.hub.Broadcast(domain.SyncEvent{
+		EventType: domain.EventRecordUpdated,
+		RecordID:  id,
+		Occurred:  now,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "is_favorite": body.IsFavorite})
+}
+
+func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	category := q.Get("category")
+	keyword := q.Get("keyword")
+	prompts, err := s.store.ListPrompts(r.Context(), category, keyword)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "count": len(body.IDs)})
+	writeJSON(w, http.StatusOK, map[string]any{"prompts": prompts})
+}
+
+func (s *Server) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var p domain.PromptTemplate
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.TemplateContent) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title and template_content are required"})
+		return
+	}
+	if err := s.store.SavePrompt(r.Context(), &p); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleDeletePrompt(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	if err := s.store.DeletePrompt(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleUsePrompt(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	if err := s.store.IncrementPromptUsage(r.Context(), id); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

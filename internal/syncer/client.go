@@ -227,6 +227,117 @@ func (c *Client) Subscribe(ctx context.Context, ownDeviceID string, onEvent func
 	return ctx.Err()
 }
 
+func (c *Client) SetFavorite(ctx context.Context, id string, isFavorite bool) error {
+	payload, err := json.Marshal(map[string]bool{"is_favorite": isFavorite})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/clipboard/records/"+url.PathEscape(id)+"/favorite", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return responseError(resp)
+	}
+	return nil
+}
+
+func (c *Client) ListPrompts(ctx context.Context, category, keyword string) ([]*domain.PromptTemplate, error) {
+	q := url.Values{}
+	if category != "" {
+		q.Set("category", category)
+	}
+	if keyword != "" {
+		q.Set("keyword", keyword)
+	}
+	urlStr := c.BaseURL + "/api/v1/clipboard/prompts"
+	if len(q) > 0 {
+		urlStr += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, responseError(resp)
+	}
+	var body struct {
+		Prompts []*domain.PromptTemplate `json:"prompts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	return body.Prompts, nil
+}
+
+func (c *Client) SavePrompt(ctx context.Context, prompt *domain.PromptTemplate) (*domain.PromptTemplate, error) {
+	payload, err := json.Marshal(prompt)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/clipboard/prompts", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, responseError(resp)
+	}
+	var saved domain.PromptTemplate
+	if err := json.NewDecoder(resp.Body).Decode(&saved); err != nil {
+		return nil, err
+	}
+	return &saved, nil
+}
+
+func (c *Client) DeletePrompt(ctx context.Context, id string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+"/api/v1/clipboard/prompts/"+url.PathEscape(id), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return responseError(resp)
+	}
+	return nil
+}
+
+func (c *Client) UsePrompt(ctx context.Context, id string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/clipboard/prompts/"+url.PathEscape(id)+"/use", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return responseError(resp)
+	}
+	return nil
+}
+
 func responseError(resp *http.Response) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if len(data) == 0 {

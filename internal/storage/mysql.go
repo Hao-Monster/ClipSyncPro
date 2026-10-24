@@ -634,7 +634,13 @@ WHERE id=?`, isFavorite, favoriteAt, now, id)
 		return err
 	}
 	if affected == 0 {
-		return ErrNotFound
+		// MySQL 默认返回实际变更行数：同一毫秒内重复写入相同值会得到 0，需要二次确认记录是否存在。
+		var exists int
+		err := s.db.QueryRowContext(ctx, "SELECT 1 FROM clipboard_record WHERE id = ? LIMIT 1", id).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
 	}
 	return nil
 }
@@ -711,6 +717,16 @@ func (s *MySQLStore) SavePrompt(ctx context.Context, prompt *domain.PromptTempla
 		newP := domain.NewPromptTemplate(prompt.Title, prompt.Category, prompt.TemplateContent, prompt.Shortcut)
 		newP.IsFavorite = prompt.IsFavorite
 		*prompt = *newP
+	} else {
+		// 编辑已有模板时保留服务端维护的使用次数与创建时间，避免客户端提交旧值覆盖。
+		existing, err := s.GetPrompt(ctx, prompt.ID)
+		switch {
+		case err == nil:
+			prompt.UsageCount = existing.UsageCount
+			prompt.CreatedAt = existing.CreatedAt
+		case !errors.Is(err, ErrNotFound):
+			return err
+		}
 	}
 	prompt.Variables = domain.ExtractVariables(prompt.TemplateContent)
 	varJSON, _ := json.Marshal(prompt.Variables)
@@ -729,7 +745,6 @@ ON DUPLICATE KEY UPDATE
     template_content=VALUES(template_content),
     variables_json=VALUES(variables_json),
     shortcut=VALUES(shortcut),
-    usage_count=VALUES(usage_count),
     is_favorite=VALUES(is_favorite),
     updated_at=VALUES(updated_at)`,
 		prompt.ID, prompt.Title, prompt.Category, prompt.TemplateContent, string(varJSON), nullIfEmpty(prompt.Shortcut),
@@ -743,6 +758,16 @@ func (s *MySQLStore) DeletePrompt(ctx context.Context, id string) error {
 }
 
 func (s *MySQLStore) IncrementPromptUsage(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE prompt_template SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?", time.Now(), id)
-	return err
+	res, err := s.db.ExecContext(ctx, "UPDATE prompt_template SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?", time.Now(), id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

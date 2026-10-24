@@ -605,14 +605,17 @@ func (a *Agent) handleSetFavorite(w http.ResponseWriter, r *http.Request, id str
 		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if err := a.store.SetFavorite(r.Context(), id, body.IsFavorite); err != nil {
+	rec, err := a.service.SetFavorite(r.Context(), id, body.IsFavorite)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeAgentJSON(w, http.StatusNotFound, map[string]string{"error": "record not found"})
+		return
+	}
+	if err != nil {
 		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if rec, err := a.store.GetRecord(r.Context(), id); err == nil {
-		a.broadcastRecordUpdated(rec)
-	}
-	writeAgentJSON(w, http.StatusOK, map[string]any{"status": "ok", "is_favorite": body.IsFavorite})
+	a.broadcastRecordUpdated(rec)
+	writeAgentJSON(w, http.StatusOK, map[string]any{"status": "ok", "is_favorite": rec.IsFavorite})
 }
 
 func (a *Agent) handleListPrompts(w http.ResponseWriter, r *http.Request) {
@@ -664,7 +667,12 @@ func (a *Agent) handlePromptAction(w http.ResponseWriter, r *http.Request, tail 
 		}
 		writeAgentJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	case action == "use" && r.Method == http.MethodPost:
-		if err := a.store.IncrementPromptUsage(r.Context(), id); err != nil {
+		err := a.store.IncrementPromptUsage(r.Context(), id)
+		if errors.Is(err, storage.ErrNotFound) {
+			writeAgentJSON(w, http.StatusNotFound, map[string]string{"error": "prompt not found"})
+			return
+		}
+		if err != nil {
 			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
