@@ -121,11 +121,15 @@ func (s *Server) handleUpsert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store write failed"})
 		return
 	}
+	actorDeviceID := r.Header.Get("X-Device-ID")
+	if actorDeviceID == "" {
+		actorDeviceID = rec.SourceDeviceID
+	}
 	s.hub.Broadcast(domain.SyncEvent{
 		EventType: eventType,
 		RecordID:  rec.ID,
 		Occurred:  now,
-		DeviceID:  rec.SourceDeviceID,
+		DeviceID:  actorDeviceID,
 	})
 	writeJSON(w, http.StatusOK, rec)
 }
@@ -208,10 +212,12 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 	now := s.now().UTC()
+	actorDeviceID := r.Header.Get("X-Device-ID")
 	s.hub.Broadcast(domain.SyncEvent{
 		EventType: domain.EventRecordDeleted,
 		RecordID:  id,
 		Occurred:  now,
+		DeviceID:  actorDeviceID,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -246,11 +252,13 @@ func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		now := s.now().UTC()
+		actorDeviceID := r.Header.Get("X-Device-ID")
 		for _, id := range ids {
 			s.hub.Broadcast(domain.SyncEvent{
 				EventType: domain.EventRecordDeleted,
 				RecordID:  id,
 				Occurred:  now,
+				DeviceID:  actorDeviceID,
 			})
 		}
 	}
@@ -275,10 +283,12 @@ func (s *Server) handleSetFavorite(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	now := s.now().UTC()
+	actorDeviceID := r.Header.Get("X-Device-ID")
 	s.hub.Broadcast(domain.SyncEvent{
 		EventType: domain.EventRecordUpdated,
 		RecordID:  id,
 		Occurred:  now,
+		DeviceID:  actorDeviceID,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "is_favorite": body.IsFavorite})
 }

@@ -57,6 +57,7 @@ func New(store storage.Store, cfg Config) *Agent {
 	var syncClient *syncer.Client
 	if cfg.ServerURL != "" {
 		syncClient = syncer.NewClient(cfg.ServerURL)
+		syncClient.DeviceID = cfg.DeviceID
 	}
 	return &Agent{
 		cfg:             cfg,

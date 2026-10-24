@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -251,5 +252,93 @@ func TestClientPromptsMethods(t *testing.T) {
 	// Delete
 	if err := client.DeletePrompt(t.Context(), "p1"); err != nil {
 		t.Fatalf("unexpected delete error: %v", err)
+	}
+}
+
+func TestActorDeviceIDLoopbackFiltering(t *testing.T) {
+	remote := storage.NewMemoryStore()
+	server := httptest.NewServer(httpapi.NewServer(remote, ""))
+	defer server.Close()
+
+	clientActor := NewClient(server.URL)
+	clientActor.DeviceID = "dev-actor"
+
+	// Create a record whose source is dev-origin, but mutated by dev-actor
+	rec := domain.ClipboardRecord{
+		ID:             "rec-shared-1",
+		UserID:         "local",
+		ContentType:    domain.ContentText,
+		ContentText:    "shared text",
+		SourceDeviceID: "dev-origin",
+	}
+
+	actorReceived := make(chan domain.SyncEvent, 10)
+	otherReceived := make(chan domain.SyncEvent, 10)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	go func() {
+		_ = clientActor.Subscribe(ctx, "dev-actor", func(e domain.SyncEvent) error {
+			actorReceived <- e
+			return nil
+		})
+	}()
+
+	clientOther := NewClient(server.URL)
+	go func() {
+		_ = clientOther.Subscribe(ctx, "dev-other", func(e domain.SyncEvent) error {
+			otherReceived <- e
+			return nil
+		})
+	}()
+
+	// Wait for SSE subscriptions to connect
+	time.Sleep(100 * time.Millisecond)
+
+	// Actor pushes record
+	if _, err := clientActor.PushRecord(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case event := <-otherReceived:
+		if event.DeviceID != "dev-actor" {
+			t.Fatalf("expected broadcast event.DeviceID = 'dev-actor', got %q", event.DeviceID)
+		}
+		if event.RecordID != rec.ID {
+			t.Fatalf("expected record id %q, got %q", rec.ID, event.RecordID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event on other device")
+	}
+
+	// Actor should NOT receive its own event due to loopback suppression
+	select {
+	case event := <-actorReceived:
+		t.Fatalf("actor received own event: %+v", event)
+	case <-time.After(150 * time.Millisecond):
+		// Success
+	}
+
+	// Actor toggles favorite
+	if err := clientActor.SetFavorite(ctx, rec.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case event := <-otherReceived:
+		if event.DeviceID != "dev-actor" || event.EventType != domain.EventRecordUpdated {
+			t.Fatalf("unexpected favorite event: %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for favorite event on other device")
+	}
+
+	select {
+	case event := <-actorReceived:
+		t.Fatalf("actor received own favorite event: %+v", event)
+	case <-time.After(150 * time.Millisecond):
+		// Success
 	}
 }

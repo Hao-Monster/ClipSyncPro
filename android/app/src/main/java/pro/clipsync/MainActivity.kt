@@ -462,7 +462,14 @@ private fun PromptFillDialog(
                 onClick = {
                     var result = prompt.templateContent
                     variableValues.forEach { (k, v) ->
-                        result = result.replace("{$k}", v)
+                        val regex = Regex("\\{" + Regex.escape(k) + "(?::([^}]+))?\\}")
+                        result = regex.replace(result) { match ->
+                            if (v.isNotEmpty()) {
+                                v
+                            } else {
+                                match.groups[1]?.value ?: ""
+                            }
+                        }
                     }
                     onConfirm(result)
                 }

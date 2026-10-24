@@ -69,7 +69,11 @@ class ClipSyncApi(private val baseUrl: String) {
         if (body != null) {
             OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body) }
         }
-        val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+        val stream = if (conn.responseCode in 200..299) {
+            conn.inputStream
+        } else {
+            conn.errorStream ?: conn.inputStream ?: java.io.ByteArrayInputStream(ByteArray(0))
+        }
         val text = BufferedReader(stream.reader(Charsets.UTF_8)).use { it.readText() }
         if (conn.responseCode !in 200..299) error(text)
         return text

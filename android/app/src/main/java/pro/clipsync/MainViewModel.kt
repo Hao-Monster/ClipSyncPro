@@ -99,16 +99,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleFavorite(record: ClipboardRecord) {
         viewModelScope.launch {
-            _state.update { it.copy(loading = true) }
             val newFav = !record.isFavorite
+            val previousRecords = state.value.records
+            // 乐观更新界面：收藏页取消收藏时即时移出，全部页翻转星标状态
+            _state.update { current ->
+                val updatedList = if (current.activeTab == "FAVORITE" && !newFav) {
+                    current.records.filter { it.id != record.id }
+                } else {
+                    current.records.map {
+                        if (it.id == record.id) it.copy(isFavorite = newFav) else it
+                    }
+                }
+                current.copy(
+                    records = updatedList,
+                    status = if (newFav) "已加入收藏" else "已取消收藏"
+                )
+            }
             val result = withContext(Dispatchers.IO) {
                 runCatching { repository.api.setFavorite(record.id, newFav) }
             }
-            result.onSuccess {
-                _state.update { it.copy(loading = false, status = if (newFav) "已加入收藏" else "已取消收藏") }
-                refresh()
-            }.onFailure { error ->
-                _state.update { it.copy(loading = false, status = error.message ?: "操作失败") }
+            result.onFailure { error ->
+                // 请求失败时回滚列表数据
+                _state.update { current ->
+                    current.copy(
+                        records = previousRecords,
+                        status = error.message ?: "操作失败"
+                    )
+                }
             }
         }
     }
@@ -143,7 +160,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getCurrentClipboardText(): String {
         val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        return clipboard.primaryClip?.getItemAt(0)?.coerceToText(getApplication())?.toString().orEmpty()
+        val clip = clipboard.primaryClip
+        return if (clip != null && clip.itemCount > 0) {
+            clip.getItemAt(0)?.coerceToText(getApplication())?.toString().orEmpty()
+        } else ""
     }
 
     fun applyPrompt(prompt: PromptTemplate, finalContent: String) {

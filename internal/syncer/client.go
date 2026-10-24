@@ -19,6 +19,7 @@ import (
 
 type Client struct {
 	BaseURL    string
+	DeviceID   string
 	HTTPClient *http.Client
 }
 
@@ -51,6 +52,9 @@ func (c *Client) pushRecordPayload(ctx context.Context, payload []byte) (domain.
 		return domain.ClipboardRecord{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.DeviceID != "" {
+		req.Header.Set("X-Device-ID", c.DeviceID)
+	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return domain.ClipboardRecord{}, err
@@ -70,6 +74,9 @@ func (c *Client) DeleteRecord(ctx context.Context, id string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+"/api/v1/clipboard/records/"+id, nil)
 	if err != nil {
 		return err
+	}
+	if c.DeviceID != "" {
+		req.Header.Set("X-Device-ID", c.DeviceID)
 	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -237,6 +244,9 @@ func (c *Client) SetFavorite(ctx context.Context, id string, isFavorite bool) er
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.DeviceID != "" {
+		req.Header.Set("X-Device-ID", c.DeviceID)
+	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return err
