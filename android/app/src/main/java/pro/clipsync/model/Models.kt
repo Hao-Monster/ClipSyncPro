@@ -11,6 +11,16 @@ data class CipherText(
     val nonce: String,
     val ciphertext: String,
 ) {
+    fun toJson(): JSONObject {
+        return JSONObject()
+            .put("algorithm", algorithm)
+            .put("kdf", kdf)
+            .put("iterations", iterations)
+            .put("salt", salt)
+            .put("nonce", nonce)
+            .put("ciphertext", ciphertext)
+    }
+
     companion object {
         fun fromJson(json: JSONObject?): CipherText? {
             if (json == null) return null
@@ -40,10 +50,16 @@ data class ClipboardRecord(
     val sourceDeviceId: String,
     val sourcePlatform: String,
     val clientCreatedAt: String,
+    val isFavorite: Boolean = false,
+    val favoriteAt: String? = null,
     val syncStatus: String,
 ) {
     val summary: String
-        get() = if (isSensitive) "已加密账户密码记录" else contentText.orEmpty().replace("\n", " ").take(120)
+        get() = when {
+            isSensitive -> "已加密账户密码记录"
+            contentType == "image" -> "图片"
+            else -> contentText.orEmpty().replace("\n", " ").take(120)
+        }
 
     companion object {
         fun fromJson(json: JSONObject): ClipboardRecord {
@@ -61,6 +77,8 @@ data class ClipboardRecord(
                 sourceDeviceId = json.optString("source_device_id"),
                 sourcePlatform = json.optString("source_platform"),
                 clientCreatedAt = json.optString("client_created_at"),
+                isFavorite = json.optBoolean("is_favorite"),
+                favoriteAt = nullableString(json, "favorite_at"),
                 syncStatus = json.optString("sync_status"),
             )
         }
@@ -73,6 +91,44 @@ data class ClipboardRecord(
 
         private fun nullableString(json: JSONObject, name: String): String? {
             return if (json.has(name) && !json.isNull(name)) json.optString(name) else null
+        }
+    }
+}
+
+data class PromptTemplate(
+    val id: String,
+    val title: String,
+    val category: String,
+    val templateContent: String,
+    val variables: List<String>,
+    val shortcut: String,
+    val usageCount: Int,
+    val isFavorite: Boolean,
+) {
+    companion object {
+        fun fromJson(json: JSONObject): PromptTemplate {
+            val vars = buildList {
+                val array = json.optJSONArray("variables")
+                if (array != null) {
+                    for (i in 0 until array.length()) add(array.getString(i))
+                }
+            }
+            return PromptTemplate(
+                id = json.optString("id"),
+                title = json.optString("title"),
+                category = json.optString("category", "通用"),
+                templateContent = json.optString("template_content"),
+                variables = vars,
+                shortcut = json.optString("shortcut"),
+                usageCount = json.optInt("usage_count"),
+                isFavorite = json.optBoolean("is_favorite"),
+            )
+        }
+
+        fun listFromJson(array: JSONArray): List<PromptTemplate> {
+            return buildList {
+                for (i in 0 until array.length()) add(fromJson(array.getJSONObject(i)))
+            }
         }
     }
 }

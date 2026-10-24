@@ -682,6 +682,10 @@ func (a *App) revealSelected(anchor uintptr) {
 	if !ok {
 		return
 	}
+	if rec.ContentType == domain.ContentImage {
+		messageBox(a.hwnd, "这是一条图片记录。可使用“复制”或“输入”将图片放回目标应用。", "查看图片")
+		return
+	}
 	revealed, err := a.service.Reveal(context.Background(), rec.ID)
 	if err != nil {
 		a.showError("查看失败: " + err.Error())
@@ -704,6 +708,18 @@ func (a *App) revealSelected(anchor uintptr) {
 }
 
 func (a *App) copySelected() {
+	rec, selected := a.selectedRecord()
+	if selected && rec.ContentType == domain.ContentImage {
+		mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
+		if err != nil {
+			a.showError("图片数据无效")
+			return
+		}
+		if err := win32.WriteClipboardImage(mimeType, data); err != nil {
+			a.showError("复制失败: " + err.Error())
+		}
+		return
+	}
 	text, ok := a.textForSelected()
 	if !ok {
 		return
@@ -714,6 +730,20 @@ func (a *App) copySelected() {
 }
 
 func (a *App) pasteSelected() {
+	rec, selected := a.selectedRecord()
+	if selected && rec.ContentType == domain.ContentImage {
+		mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
+		if err != nil {
+			a.showError("图片数据无效")
+			return
+		}
+		procShowWindow.Call(a.hwnd, swMinimize)
+		time.Sleep(120 * time.Millisecond)
+		if err := win32.PasteImage(mimeType, data); err != nil {
+			a.showError("输入失败: " + err.Error())
+		}
+		return
+	}
 	text, ok := a.textForSelected()
 	if !ok {
 		return

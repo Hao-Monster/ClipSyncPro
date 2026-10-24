@@ -15,6 +15,7 @@ const (
 )
 
 var procSendInput = user32.NewProc("SendInput")
+var procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
 
 type keyboardInput struct {
 	Vk        uint16
@@ -34,6 +35,27 @@ func PasteText(text string) error {
 	if err := WriteClipboardText(text); err != nil {
 		return err
 	}
+	return sendPasteShortcut()
+}
+
+func FocusWindow(hwnd uintptr) error {
+	if hwnd == 0 {
+		return nil
+	}
+	if result, _, err := procSetForegroundWindow.Call(hwnd); result == 0 {
+		return lastError(err, "SetForegroundWindow failed")
+	}
+	return nil
+}
+
+func PasteImage(mimeType string, data []byte) error {
+	if err := WriteClipboardImage(mimeType, data); err != nil {
+		return err
+	}
+	return sendPasteShortcut()
+}
+
+func sendPasteShortcut() error {
 	time.Sleep(60 * time.Millisecond)
 	inputs := []input{
 		newKeyboardInput(vkControl, 0),

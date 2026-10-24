@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "project": "ClipSync Pro",
+  "issues": [
+    {
+      "id": "ISSUE-001",
+      "type": "Technical Debt",
+      "title": "遗留 Base64 图片行与旧版 sync_queue 需执行安全迁移",
+      "priority": "High",
+      "status": "已实现控制",
+      "description": "数据库启动门禁已拦截旧数据；需在升级旧数据库前运行 clipsync-migrate 执行只读计划与迁移验证",
+      "exit_criterion": "本地与服务器数据库遗留旧行归零"
+    },
+    {
+      "id": "ISSUE-002",
+      "type": "Technical Debt",
+      "title": "兼容同步接口单张图片传输仍为 Base64 编码，占用内存与带宽",
+      "priority": "Medium",
+      "status": "暂缓重构",
+      "description": "后续拟引入版本化二进制图片直传/直取接口，废弃 data URL 传输",
+      "exit_criterion": "多端完成二进制接口迁移"
+    },
+    {
+      "id": "ISSUE-003",
+      "type": "Technical Debt",
+      "title": "DIB 剪贴板图片暂不接收 24/32 位 BI_RGB / BI_BITFIELDS 以外的压缩/调色板格式",
+      "priority": "Medium",
+      "status": "受控报错",
+      "description": "非标准 DIB 格式当前显式报错且不写入损坏记录，后续需增加带尺寸与解压炸弹防御的解码器",
+      "exit_criterion": "Windows 扩展格式兼容测试通过"
+    },
+    {
+      "id": "ISSUE-004",
+      "type": "Technical Debt",
+      "title": "缺少通用版本化数字迁移框架（如 golang-migrate）",
+      "priority": "Medium",
+      "status": "待建设",
+      "description": "目前由幂等工具脚本执行，下一次重大 Schema 变动前应引入标准向上/回滚迁移套件",
+      "exit_criterion": "引入版本化迁移文件并在 CI 运行"
+    },
+    {
+      "id": "ISSUE-005",
+      "type": "Limitation",
+      "title": "Android 高版本系统后台剪贴板监听策略受限",
+      "priority": "Low",
+      "status": "受限运行",
+      "description": "Android 客户端遵循 OS 前台服务模型，仅在前台或焦点激活下稳定捕获",
+      "exit_criterion": "定义所支持的 Android API 范围并在真机测试"
+    },
+    {
+      "id": "ISSUE-006",
+      "type": "Operational",
+      "title": "GitHub 仓库暂未配置自动化 CI/CD 流水线与 bingo-dev 远程部署",
+      "priority": "High",
+      "status": "已建立流水线",
+      "description": "已配置 GitHub Actions 流水线 .github/workflows/ci-cd.yml 与 bingo-dev self-hosted runner，提交合并即自动化触发构建部署",
+      "exit_criterion": "建立 CI/CD 流水线，提交触发自动化构建并成功部署至 bingo-dev"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+name: ClipSync Pro CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, codex/memory-queue-dedupe]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clipsync-pro-deployment
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Test & Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: false
+
+      - name: Run Unit Tests
+        run: |
+          go test -v ./...
+
+      - name: Verify Binary Builds
+        run: |
+          mkdir -p bin
+          go build -v -o bin/clipsync-server ./cmd/clipsync-server
+          go build -v -o bin/clipsync-agent ./cmd/clipsync-agent
+          go build -v -o bin/clipsync-migrate ./cmd/clipsync-migrate
+
+  deploy-bingo-dev:
+    name: Deploy to Development Server (bingo-dev)
+    needs: [validate]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/memory-queue-dedupe' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, bingo-dev]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build clipsync-server with Commit SHA
+        run: |
+          export PATH="/home/bingo/.local/bin:$PATH"
+          export GOPROXY="https://goproxy.cn,direct"
+          echo "Building clipsync-server for commit: ${{ github.sha }}"
+          go build -ldflags "-X main.Version=1.0.0 -X main.Commit=${{ github.sha }}" -o /opt/clipsync/clipsync-server.new ./cmd/clipsync-server
+
+      - name: Atomic Deploy & Service Restart
+        run: |
+          if [ -f /opt/clipsync/clipsync-server ]; then
+            cp /opt/clipsync/clipsync-server /opt/clipsync/clipsync-server.prev
+          fi
+          mv /opt/clipsync/clipsync-server.new /opt/clipsync/clipsync-server
+          chmod +x /opt/clipsync/clipsync-server
+          sudo systemctl restart clipsync-server
+
+      - name: Loopback Health Verification
+        run: |
+          sleep 2
+          RESPONSE=$(curl -s -f http://127.0.0.1:37617/healthz)
+          echo "Loopback health response: $RESPONSE"
+          echo "$RESPONSE" | grep -q '"status":"ok"' || { echo "Health check failed!"; exit 1; }
+
+      - name: Nginx Gateway Verification
+        run: |
+          NGINX_RESP=$(curl -s -f -H "Host: clipsync.openal.uk" http://127.0.0.1:80/healthz)
+          echo "Nginx gateway response: $NGINX_RESP"
+          echo "$NGINX_RESP" | grep -q '"status":"ok"' || { echo "Nginx routing verification failed!"; exit 1; }
+
+      - name: Deployment Audit Report
+        run: |
+          echo "=========================================="
+          echo "ClipSync Pro Server Deployed Successfully!"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Target Host: $(hostname)"
+          echo "Service Status: $(sudo systemctl is-active clipsync-server)"
+          echo "Endpoint: http://127.0.0.1:37617/healthz"
+          echo "Gateway: http://127.0.0.1:80/healthz (Host: clipsync.openal.uk)"
+          echo "=========================================="

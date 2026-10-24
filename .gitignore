@@ -3,6 +3,11 @@
 .env
 local.env
 tmp/
+dist/
 .gradle/
+bin/
+obj/
 build/
 android/**/build/
+artifacts/
+backups/

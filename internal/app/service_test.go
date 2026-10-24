@@ -1,12 +1,41 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
 	"clipsyncpro/internal/domain"
 	"clipsyncpro/internal/storage"
 )
+
+func TestCaptureImagePersistsAndQueuesRecord(t *testing.T) {
+	store := storage.NewMemoryStore()
+	service := NewService(store, Config{UserID: "local", DeviceID: "dev", Platform: domain.PlatformWindows})
+	data := []byte{0x89, 'P', 'N', 'G', 1, 2, 3}
+	rec, err := service.CaptureImage(context.Background(), "image/png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.ContentType != domain.ContentImage {
+		t.Fatalf("content type = %q", rec.ContentType)
+	}
+	stored, err := store.GetRecord(context.Background(), rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ContentText != "" {
+		t.Fatalf("image was persisted as text: %d bytes", len(stored.ContentText))
+	}
+	_, got, err := domain.DecodeClipboardRecordImage(stored)
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("stored image mismatch: %v %x", err, got)
+	}
+	queue, err := store.ListPendingQueue(context.Background(), 10)
+	if err != nil || len(queue) != 1 || queue[0].Action != storage.QueueCreate {
+		t.Fatalf("unexpected queue: %+v, err=%v", queue, err)
+	}
+}
 
 func TestCaptureMarkRevealSearchDelete(t *testing.T) {
 	store := storage.NewMemoryStore()

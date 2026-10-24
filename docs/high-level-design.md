@@ -18,7 +18,7 @@
 ## Windows Flow
 
 1. Clipboard sequence number changes.
-2. Agent reads Unicode text from Windows clipboard.
+2. Agent reads Unicode text or PNG/DIB image data from the Windows clipboard.
 3. App service creates a `ClipboardRecord`.
 4. Store writes the record to local MySQL.
 5. Store appends `sync_queue(create)`.
@@ -57,19 +57,20 @@ Windows local MySQL is the fast local source of truth for the native Windows UI.
 
 Implemented:
 
-- text clipboard capture on Windows
+- text and image clipboard capture on Windows
 - local MySQL schema and store
 - record APIs
 - sync queue
 - sensitive encryption and reveal
 - sensitive search hash generation
 - Win32 native Windows UI
-- Windows clipboard read/write and paste primitives
+- Windows text/image clipboard read/write and paste primitives
+- per-user Windows startup registration
 - Android Kotlin Activity and foreground clipboard service source
 
 Planned next:
 
-- binary/image/file clipboard payload adapters
+- file and other binary clipboard payload adapters
 - production MySQL server store
-- tray icon menu and installer task-scheduler autostart
+- tray icon menu and optional installer task-scheduler autostart
 - Android accessibility/input-method capture variants

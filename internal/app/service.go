@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ var (
 	ErrPasswordRequired  = errors.New("密码不能为空")
 	ErrRevealRequired    = errors.New("请先点击查看")
 	ErrSensitiveRequired = errors.New("仅账户/密码记录支持修改备注")
+	ErrTextRequired      = errors.New("图片不能标记为账户或密码")
 )
 
 type Service struct {
@@ -73,6 +73,21 @@ func (s *Service) CaptureText(ctx context.Context, content string) (domain.Clipb
 	return rec, nil
 }
 
+func (s *Service) CaptureImage(ctx context.Context, mimeType string, data []byte) (domain.ClipboardRecord, error) {
+	now := s.now()
+	rec, err := domain.NewClipboardImageRecord(s.userID, s.deviceID, s.platform, mimeType, data, now)
+	if err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	if err := s.store.UpsertRecord(ctx, rec); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	if err := s.enqueueRecord(ctx, storage.QueueCreate, rec); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	return rec, nil
+}
+
 func (s *Service) List(ctx context.Context, filter storage.Filter) ([]domain.ClipboardRecord, error) {
 	if filter.UserID == "" {
 		filter.UserID = s.userID
@@ -80,7 +95,7 @@ func (s *Service) List(ctx context.Context, filter storage.Filter) ([]domain.Cli
 	if filter.Keyword != "" {
 		filter.KeywordHashes = security.BuildQueryIndex(s.secret, filter.Keyword)
 	}
-	return s.store.ListRecords(ctx, filter)
+	return s.store.ListRecordSummaries(ctx, filter)
 }
 
 func (s *Service) MarkPassword(ctx context.Context, id, account, remark string) (domain.ClipboardRecord, error) {
@@ -103,6 +118,9 @@ func (s *Service) markSensitive(ctx context.Context, id string, kind domain.Sens
 	rec, err := s.store.GetRecord(ctx, id)
 	if err != nil {
 		return domain.ClipboardRecord{}, err
+	}
+	if rec.ContentType == domain.ContentImage {
+		return domain.ClipboardRecord{}, ErrTextRequired
 	}
 	content := rec.ContentText
 	if rec.IsSensitive {
@@ -233,6 +251,21 @@ func (s *Service) UpdateRemark(ctx context.Context, id, remark string) (domain.C
 	return rec, nil
 }
 
+// SetFavorite 更新收藏状态并写入持久化同步队列，保证离线切换收藏后仍能最终同步到服务端与其他设备。
+func (s *Service) SetFavorite(ctx context.Context, id string, isFavorite bool) (domain.ClipboardRecord, error) {
+	if err := s.store.SetFavorite(ctx, id, isFavorite); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	rec, err := s.store.GetRecord(ctx, id)
+	if err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	if err := s.enqueueRecord(ctx, storage.QueueUpdate, rec); err != nil {
+		return domain.ClipboardRecord{}, err
+	}
+	return rec, nil
+}
+
 func (s *Service) Delete(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -240,15 +273,10 @@ func (s *Service) Delete(ctx context.Context, ids []string) error {
 	if err := s.store.DeleteRecords(ctx, ids); err != nil {
 		return err
 	}
-	payload, err := json.Marshal(map[string][]string{"ids": ids})
-	if err != nil {
-		return err
-	}
 	for _, id := range ids {
 		if _, err := s.store.Enqueue(ctx, storage.SyncQueueItem{
 			RecordID:  id,
 			Action:    storage.QueueDelete,
-			Payload:   string(payload),
 			Status:    storage.QueuePending,
 			CreatedAt: s.now(),
 		}); err != nil {
@@ -259,14 +287,9 @@ func (s *Service) Delete(ctx context.Context, ids []string) error {
 }
 
 func (s *Service) enqueueRecord(ctx context.Context, action storage.QueueAction, rec domain.ClipboardRecord) error {
-	payload, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	_, err = s.store.Enqueue(ctx, storage.SyncQueueItem{
+	_, err := s.store.Enqueue(ctx, storage.SyncQueueItem{
 		RecordID:  rec.ID,
 		Action:    action,
-		Payload:   string(payload),
 		Status:    storage.QueuePending,
 		CreatedAt: s.now(),
 	})

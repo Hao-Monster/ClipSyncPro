@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,18 +18,33 @@ import (
 )
 
 type Server struct {
-	store  storage.Store
-	secret string
-	hub    *Hub
-	now    func() time.Time
+	store   storage.Store
+	secret  string
+	hub     *Hub
+	now     func() time.Time
+	version string
+	commit  string
 }
+
+const maxRecordRequestBytes = 90 << 20
 
 func NewServer(store storage.Store, secret string) *Server {
 	return &Server{
-		store:  store,
-		secret: secret,
-		hub:    NewHub(),
-		now:    time.Now,
+		store:   store,
+		secret:  secret,
+		hub:     NewHub(),
+		now:     time.Now,
+		version: "1.0.0",
+		commit:  "dev",
+	}
+}
+
+func (s *Server) SetVersion(version, commit string) {
+	if version != "" {
+		s.version = version
+	}
+	if commit != "" {
+		s.commit = commit
 	}
 }
 
@@ -42,7 +58,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
 	case path == "/healthz":
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"version": s.version,
+			"commit":  s.commit,
+		})
 	case path == "/ws/v1/sync" || path == "/api/v1/sync/events":
 		s.handleEvents(w, r)
 	case path == "/api/v1/clipboard/records" && r.Method == http.MethodPost:
@@ -53,6 +73,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleList(w, r)
 	case path == "/api/v1/clipboard/records/batch-delete" && r.Method == http.MethodPost:
 		s.handleBatchDelete(w, r)
+	case strings.HasSuffix(path, "/favorite") && strings.HasPrefix(path, "/api/v1/clipboard/records/") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/clipboard/records/"), "/favorite")
+		s.handleSetFavorite(w, r, id)
+	case path == "/api/v1/clipboard/prompts" && r.Method == http.MethodGet:
+		s.handleListPrompts(w, r)
+	case path == "/api/v1/clipboard/prompts" && r.Method == http.MethodPost:
+		s.handleSavePrompt(w, r)
+	case strings.HasPrefix(path, "/api/v1/clipboard/prompts/") && strings.HasSuffix(path, "/use") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/clipboard/prompts/"), "/use")
+		s.handleUsePrompt(w, r, id)
+	case strings.HasPrefix(path, "/api/v1/clipboard/prompts/") && r.Method == http.MethodDelete:
+		id := strings.TrimPrefix(path, "/api/v1/clipboard/prompts/")
+		s.handleDeletePrompt(w, r, id)
+	case strings.HasPrefix(path, "/api/v1/clipboard/records/") && r.Method == http.MethodGet:
+		id := strings.TrimPrefix(path, "/api/v1/clipboard/records/")
+		s.handleGet(w, r, id)
 	case strings.HasPrefix(path, "/api/v1/clipboard/records/") && r.Method == http.MethodDelete:
 		id := strings.TrimPrefix(path, "/api/v1/clipboard/records/")
 		s.handleDelete(w, r, id)
@@ -63,8 +99,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpsert(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, maxRecordRequestBytes)
 	var rec domain.ClipboardRecord
 	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "record is too large"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
@@ -96,13 +138,39 @@ func (s *Server) handleUpsert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store write failed"})
 		return
 	}
+	actorDeviceID := r.Header.Get("X-Device-ID")
+	if actorDeviceID == "" {
+		actorDeviceID = rec.SourceDeviceID
+	}
 	s.hub.Broadcast(domain.SyncEvent{
 		EventType: eventType,
-		Record:    &rec,
+		RecordID:  rec.ID,
 		Occurred:  now,
-		DeviceID:  rec.SourceDeviceID,
+		DeviceID:  actorDeviceID,
 	})
 	writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	record, err := s.store.GetRecord(r.Context(), id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store read failed"})
+		return
+	}
+	wireRecord, err := domain.ClipboardRecordForWire(record)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "record image is invalid"})
+		return
+	}
+	writeJSON(w, http.StatusOK, wireRecord)
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +178,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	records, err := s.store.ListRecords(r.Context(), filter)
+	records, err := s.store.ListRecordSummaries(r.Context(), filter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store list failed"})
 		return
@@ -124,7 +192,14 @@ func (s *Server) filterFromQuery(w http.ResponseWriter, r *http.Request) (storag
 		UserID:        q.Get("user_id"),
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		SensitiveOnly: q.Get("sensitive") == "true" || q.Get("sensitive") == "1",
-		Limit:         500,
+		FavoriteOnly:  q.Get("favorite") == "true" || q.Get("favorite") == "1",
+		Limit:         10,
+		Offset:        0,
+	}
+	if raw := q.Get("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			filter.Offset = n
+		}
 	}
 	if filter.UserID == "" {
 		filter.UserID = "local"
@@ -154,10 +229,12 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 	now := s.now().UTC()
+	actorDeviceID := r.Header.Get("X-Device-ID")
 	s.hub.Broadcast(domain.SyncEvent{
 		EventType: domain.EventRecordDeleted,
 		RecordID:  id,
 		Occurred:  now,
+		DeviceID:  actorDeviceID,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -165,25 +242,130 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, id string)
 func (s *Server) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var body struct {
-		IDs []string `json:"ids"`
+		IDs          []string `json:"ids"`
+		SkipFavorite bool     `json:"skip_favorite"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
-	if err := s.store.DeleteRecords(r.Context(), body.IDs); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})
+	ids := body.IDs
+	skipped := 0
+	if body.SkipFavorite {
+		var toDelete []string
+		for _, id := range ids {
+			rec, err := s.store.GetRecord(r.Context(), id)
+			if err == nil && rec.IsFavorite {
+				skipped++
+				continue
+			}
+			toDelete = append(toDelete, id)
+		}
+		ids = toDelete
+	}
+	if len(ids) > 0 {
+		if err := s.store.DeleteRecords(r.Context(), ids); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})
+			return
+		}
+		now := s.now().UTC()
+		actorDeviceID := r.Header.Get("X-Device-ID")
+		for _, id := range ids {
+			s.hub.Broadcast(domain.SyncEvent{
+				EventType: domain.EventRecordDeleted,
+				RecordID:  id,
+				Occurred:  now,
+				DeviceID:  actorDeviceID,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "count": len(ids), "skipped": skipped})
+}
+
+func (s *Server) handleSetFavorite(w http.ResponseWriter, r *http.Request, id string) {
+	defer r.Body.Close()
+	var body struct {
+		IsFavorite bool `json:"is_favorite"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := s.store.SetFavorite(r.Context(), id, body.IsFavorite); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "favorite update failed"})
 		return
 	}
 	now := s.now().UTC()
-	for _, id := range body.IDs {
-		s.hub.Broadcast(domain.SyncEvent{
-			EventType: domain.EventRecordDeleted,
-			RecordID:  id,
-			Occurred:  now,
-		})
+	actorDeviceID := r.Header.Get("X-Device-ID")
+	s.hub.Broadcast(domain.SyncEvent{
+		EventType: domain.EventRecordUpdated,
+		RecordID:  id,
+		Occurred:  now,
+		DeviceID:  actorDeviceID,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "is_favorite": body.IsFavorite})
+}
+
+func (s *Server) handleListPrompts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	category := q.Get("category")
+	keyword := q.Get("keyword")
+	prompts, err := s.store.ListPrompts(r.Context(), category, keyword)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "count": len(body.IDs)})
+	writeJSON(w, http.StatusOK, map[string]any{"prompts": prompts})
+}
+
+func (s *Server) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var p domain.PromptTemplate
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.TemplateContent) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title and template_content are required"})
+		return
+	}
+	if err := s.store.SavePrompt(r.Context(), &p); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleDeletePrompt(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	if err := s.store.DeletePrompt(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleUsePrompt(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	if err := s.store.IncrementPromptUsage(r.Context(), id); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -266,9 +448,11 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Native clients do not require CORS. Omitting ACAO prevents arbitrary web
+	// origins from reading a privately deployed user's clipboard history.
 	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
 
 func ListenAndServe(ctx context.Context, addr string, handler http.Handler) error {

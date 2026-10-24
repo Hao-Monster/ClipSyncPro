@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "project": "ClipSync Pro",
+  "milestones": [
+    {
+      "id": "M1",
+      "name": "Core MVP Architecture Foundation",
+      "description": "Go 服务端核心 CRUD、AES-256-GCM 加密、Win32 原生客户端骨架、Android MVP 骨架与本地 MySQL 存储",
+      "status": "已完成",
+      "due_date": "2026-08-20"
+    },
+    {
+      "id": "M2",
+      "name": "Memory, Deduplication & Storage Guard Remediation",
+      "description": "大图 BLOB 化、内存与同步队列有界控制、优先未尝试队列、Agent 保活监督与降级处理",
+      "status": "已验证待验收",
+      "due_date": "2026-09-10"
+    },
+    {
+      "id": "M3",
+      "name": "WinUI 3 Fluent Experience & Direct Input Enhancements",
+      "description": "WinUI 3 亚克力现代窗体、右上角停靠、双击前台窗口激活与模拟输入、右键功能菜单、Offset 分页支持",
+      "status": "开发完成待合并验收",
+      "due_date": "2026-09-25"
+    },
+    {
+      "id": "M4",
+      "name": "Automated CI/CD & Dev-Test Server Deployment",
+      "description": "配置 GitHub Actions 自动化 CI/CD 流水线，打通至 bingo-dev 开发测试服务器（clipsync.openal.uk）",
+      "status": "计划中",
+      "due_date": "2026-10-10"
+    }
+  ]
+}

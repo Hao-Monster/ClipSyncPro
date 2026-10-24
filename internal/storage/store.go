@@ -18,8 +18,10 @@ type Filter struct {
 	DateStart      *time.Time
 	DateEnd        *time.Time
 	SensitiveOnly  bool
+	FavoriteOnly   bool
 	IncludeDeleted bool
 	Limit          int
+	Offset         int
 }
 
 type QueueAction string
@@ -40,26 +42,47 @@ const (
 )
 
 type SyncQueueItem struct {
-	ID         int64       `json:"id"`
-	RecordID   string      `json:"record_id"`
-	Action     QueueAction `json:"action"`
-	Payload    string      `json:"payload"`
-	RetryCount int         `json:"retry_count"`
-	Status     QueueStatus `json:"status"`
-	LastError  string      `json:"last_error,omitempty"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
+	ID            int64       `json:"id"`
+	RecordID      string      `json:"record_id"`
+	Action        QueueAction `json:"action"`
+	RetryCount    int         `json:"retry_count"`
+	Status        QueueStatus `json:"status"`
+	LastError     string      `json:"last_error,omitempty"`
+	NextAttemptAt time.Time   `json:"next_attempt_at"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }
 
 type Store interface {
 	UpsertRecord(ctx context.Context, rec domain.ClipboardRecord) error
 	GetRecord(ctx context.Context, id string) (domain.ClipboardRecord, error)
 	ListRecords(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error)
+	ListRecordSummaries(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error)
 	DeleteRecords(ctx context.Context, ids []string) error
+	SetFavorite(ctx context.Context, id string, isFavorite bool) error
 	Enqueue(ctx context.Context, item SyncQueueItem) (int64, error)
 	ListPendingQueue(ctx context.Context, limit int) ([]SyncQueueItem, error)
 	MarkQueueDone(ctx context.Context, id int64) error
 	MarkQueueRetry(ctx context.Context, id int64, errText string) error
+	ListPrompts(ctx context.Context, category, keyword string) ([]*domain.PromptTemplate, error)
+	GetPrompt(ctx context.Context, id string) (*domain.PromptTemplate, error)
+	SavePrompt(ctx context.Context, prompt *domain.PromptTemplate) error
+	DeletePrompt(ctx context.Context, id string) error
+	IncrementPromptUsage(ctx context.Context, id string) error
+}
+
+func QueueRetryDelay(retryCount int) time.Duration {
+	if retryCount < 1 {
+		retryCount = 1
+	}
+	if retryCount > 9 {
+		return 15 * time.Minute
+	}
+	delay := 5 * time.Second * time.Duration(1<<uint(retryCount-1))
+	if delay > 15*time.Minute {
+		return 15 * time.Minute
+	}
+	return delay
 }
 
 func RecordMatchesFilter(rec domain.ClipboardRecord, filter Filter) bool {
@@ -72,6 +95,9 @@ func RecordMatchesFilter(rec domain.ClipboardRecord, filter Filter) bool {
 	if filter.SensitiveOnly && !rec.IsSensitive {
 		return false
 	}
+	if filter.FavoriteOnly && !rec.IsFavorite {
+		return false
+	}
 	if filter.DateStart != nil && rec.ClientCreatedAt.Before(*filter.DateStart) {
 		return false
 	}
@@ -80,7 +106,7 @@ func RecordMatchesFilter(rec domain.ClipboardRecord, filter Filter) bool {
 	}
 	keyword := strings.ToLower(filter.Keyword)
 	if keyword != "" {
-		if !rec.IsSensitive && strings.Contains(strings.ToLower(rec.ContentText), keyword) {
+		if !rec.IsSensitive && rec.ContentType != domain.ContentImage && strings.Contains(strings.ToLower(rec.ContentText), keyword) {
 			return true
 		}
 		if rec.IsSensitive && domain.ContainsAll(rec.SearchIndex, filter.KeywordHashes) {

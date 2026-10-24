@@ -9,8 +9,9 @@ When a clipboard value is marked as `account`, that original clipboard value bec
 Important fields:
 
 - `id`: globally unique record id.
-- `content_type`: `text`, `url`, `number`, or `other`.
-- `content_text`: non-sensitive plaintext.
+- `content_type`: `text`, `url`, `number`, `image`, or `other`.
+- `content_text`: non-sensitive plaintext; image rows keep this column empty after migration.
+- `image_mime`, `image_blob`: normalized PNG metadata and bytes. Base64 is created only at the single-record compatibility API boundary.
 - `content_cipher`: encrypted original sensitive clipboard content.
 - `account_cipher`, `password_cipher`, `remark_cipher`: encrypted sensitive fields.
 - `search_index`: keyed HMAC token hashes for sensitive search.
@@ -47,11 +48,13 @@ The confirmed PRD notes physical deletion. The MVP physically deletes records fr
 
 ## Sync Queue
 
-Queue item payloads are JSON. Actions:
+The active queue is `sync_queue_v2`. It stores only a record id and the latest action for that record; it does not persist record JSON or image Base64. Actions:
 
 - `create`
 - `update`
 - `delete`
+
+Enqueue uses a unique `record_id` to coalesce repeated changes. The worker materializes the current record immediately before sending, processes records serially, limits each pass by item count and 16 MiB of encoded data, and applies capped exponential retry backoff. Successful rows are deleted rather than retained indefinitely.
 
 Retry state:
 
@@ -72,5 +75,9 @@ The Go MVP uses Win32 APIs directly for:
 - `SetClipboardData`
 - `RegisterHotKey`
 - `SendInput`
+
+PNG and supported 24/32-bit packed DIB/DIBV5 clipboard images are normalized to PNG records. Copy/paste restores both standard DIB and PNG clipboard formats when possible. The Windows executables also maintain an idempotent `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry, which does not require elevation.
+
+Agent-originated clipboard writes are serialized with polling and tagged by the exact Windows clipboard sequence number. Only that sequence is suppressed once; a later identical value copied by another application remains a new record. Android uses an internal clip label for the equivalent app-originated text writes.
 
 `Alt + V` toggles the native Win32 client window. The default product entrypoint does not require a browser or embedded web view.

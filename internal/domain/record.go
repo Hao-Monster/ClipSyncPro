@@ -17,6 +17,7 @@ const (
 	ContentText   ContentType = "text"
 	ContentURL    ContentType = "url"
 	ContentNumber ContentType = "number"
+	ContentImage  ContentType = "image"
 	ContentOther  ContentType = "other"
 )
 
@@ -63,6 +64,8 @@ type ClipboardRecord struct {
 	UserID          string        `json:"user_id"`
 	ContentType     ContentType   `json:"content_type"`
 	ContentText     string        `json:"content_text,omitempty"`
+	ImageMIMEType   string        `json:"-"`
+	ImageData       []byte        `json:"-"`
 	ContentCipher   *CipherText   `json:"content_cipher,omitempty"`
 	ContentHash     string        `json:"content_hash"`
 	IsSensitive     bool          `json:"is_sensitive"`
@@ -77,6 +80,8 @@ type ClipboardRecord struct {
 	ServerCreatedAt *time.Time    `json:"server_created_at,omitempty"`
 	UpdatedAt       time.Time     `json:"updated_at"`
 	DeletedAt       *time.Time    `json:"deleted_at,omitempty"`
+	IsFavorite      bool          `json:"is_favorite"`
+	FavoriteAt      *time.Time    `json:"favorite_at,omitempty"`
 	SyncStatus      SyncStatus    `json:"sync_status"`
 }
 
@@ -202,6 +207,9 @@ func RedactedSummary(rec ClipboardRecord) string {
 		default:
 			return "已加密敏感记录"
 		}
+	}
+	if rec.ContentType == ContentImage {
+		return "图片"
 	}
 	const max = 120
 	text := strings.ReplaceAll(rec.ContentText, "\r\n", " ")

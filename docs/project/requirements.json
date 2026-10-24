@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "project": "ClipSync Pro",
+  "description": "ClipSync Pro 产品需求全集（对照 ClipSyncPro产品文档.md）",
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "category": "剪贴板监听",
+      "title": "Windows 端剪贴板常驻自动捕获",
+      "description": "Windows 端后台常驻，自动轮询/监听剪贴板文本与图片内容，去重写入本地存储",
+      "status": "已实现",
+      "priority": "P0",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-002",
+      "category": "数据检索",
+      "title": "剪贴板记录模糊搜索与时间筛选",
+      "description": "支持按关键字进行全文/前缀模糊搜索，以及按 yyyyMMdd 格式进行日期区间筛选",
+      "status": "已实现",
+      "priority": "P0",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-003",
+      "category": "敏感加密",
+      "title": "账户密码敏感分类与 AES-256-GCM 本地加密",
+      "description": "支持将剪贴板记录标记为账户/密码，密钥经 PBKDF2 派生并使用 AES-256-GCM 加密，密文存储及上传",
+      "status": "已实现",
+      "priority": "P0",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-004",
+      "category": "跨端同步",
+      "title": "服务端与多端 SSE/HTTP 实时同步",
+      "description": "Go 服务端提供 /ws/v1/sync 实时流推送事件，客户端队列支持重试与指数退避上报",
+      "status": "已实现",
+      "priority": "P0",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-005",
+      "category": "客户端交互",
+      "title": "WinUI 3 现代亚克力界面与 Alt+V 快捷唤醒",
+      "description": "基于 Windows App SDK WinUI 3 开发 Fluent/Acrylic 界面，默认右上角浮动，Alt+V 全局热键唤起与隐藏",
+      "status": "已实现",
+      "priority": "P0",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-006",
+      "category": "客户端交互",
+      "title": "双击还原前序窗口焦点并直接模拟输入",
+      "description": "记录唤起前的前台窗口 HWND，双击记录项时自动激活目标窗口并通过 SendInput 注入 Ctrl+V 粘贴",
+      "status": "已实现",
+      "priority": "P1",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-007",
+      "category": "客户端交互",
+      "title": "右键操作菜单与键盘快捷键",
+      "description": "列表项右键菜单支持复制、输入、删除、设为密码、设为账户；支持 Enter 复制、Delete 删除、Ctrl+C 复制",
+      "status": "已实现",
+      "priority": "P1",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-008",
+      "category": "系统能力",
+      "title": "Windows 开机自启动与单实例守护",
+      "description": "首次运行自动向当前用户注册表 Run 键写入自启动，单实例 Mutex 防止多开，WinUI 客户端自动拉起并保活 Agent 进程",
+      "status": "已实现",
+      "priority": "P1",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-009",
+      "category": "移动端",
+      "title": "Android Kotlin 客户端剪贴板前台服务与同步",
+      "description": "Android 客户端前台 Service 捕获剪贴板文本并直接上报服务端，展示历史记录并提供解密查看",
+      "status": "已实现",
+      "priority": "P1",
+      "verified": true,
+      "deployed": false
+    },
+    {
+      "id": "REQ-010",
+      "category": "运维交付",
+      "title": "自动化 CI/CD 快速流水线与服务部署",
+      "description": "GitHub Actions 自动化流水线，代码检出、单测构建后自动部署至 bingo-dev 开发测试服务器",
+      "status": "已部署",
+      "priority": "P0",
+      "verified": true,
+      "deployed": true
+    },
+    {
+      "id": "REQ-011",
+      "category": "内容收藏",
+      "title": "剪贴板记录持久收藏与淘汰保护",
+      "description": "支持单条与批量收藏星标，自动豁免 FIFO 历史淘汰，独立收藏夹展示，批量删除默认保留收藏项",
+      "status": "已部署",
+      "priority": "P0",
+      "verified": true,
+      "deployed": true
+    },
+    {
+      "id": "REQ-012",
+      "category": "智能模板",
+      "title": "常用提示词与智能变量模板库",
+      "description": "支持种子模板内置与自定义维护，智能识别 {clip} 与自定义插槽变量，弹出动态参数表单填充并合成写入剪贴板",
+      "status": "已部署",
+      "priority": "P0",
+      "verified": true,
+      "deployed": true
+    }
+  ]
+}
