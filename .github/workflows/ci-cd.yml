@@ -51,6 +51,7 @@ jobs:
       - name: Build clipsync-server with Commit SHA
         run: |
           export PATH="/home/bingo/.local/bin:$PATH"
+          export GOPROXY="https://goproxy.cn,direct"
           echo "Building clipsync-server for commit: ${{ github.sha }}"
           go build -ldflags "-X main.Version=1.0.0 -X main.Commit=${{ github.sha }}" -o /opt/clipsync/clipsync-server.new ./cmd/clipsync-server
 
