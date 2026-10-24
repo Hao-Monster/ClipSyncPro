@@ -84,11 +84,11 @@
       "id": "WI-008",
       "req_id": "REQ-010",
       "title": "GitHub Actions 自动化 CI/CD 流水线搭建与 bingo-dev 交付",
-      "status": "已验证",
+      "status": "已部署",
       "branch": "codex/memory-queue-dedupe",
-      "commit": "当前准备提交",
-      "deployed": false,
-      "acceptance_status": "待你验收",
+      "commit": "26e88cb",
+      "deployed": true,
+      "acceptance_status": "已交付待验收",
       "owner": "DevOps 团队"
     },
     {
@@ -98,7 +98,7 @@
       "status": "已验证",
       "branch": "codex/memory-queue-dedupe",
       "commit": "d3404ca",
-      "deployed": false,
+      "deployed": true,
       "acceptance_status": "待你验收",
       "owner": "Fullstack 团队"
     },
@@ -109,7 +109,7 @@
       "status": "已验证",
       "branch": "codex/memory-queue-dedupe",
       "commit": "7e930d7",
-      "deployed": false,
+      "deployed": true,
       "acceptance_status": "待你验收",
       "owner": "Fullstack 团队"
     }

@@ -99,30 +99,30 @@
       "category": "运维交付",
       "title": "自动化 CI/CD 快速流水线与服务部署",
       "description": "GitHub Actions 自动化流水线，代码检出、单测构建后自动部署至 bingo-dev 开发测试服务器",
-      "status": "已实现",
+      "status": "已部署",
       "priority": "P0",
       "verified": true,
-      "deployed": false
+      "deployed": true
     },
     {
       "id": "REQ-011",
       "category": "内容收藏",
       "title": "剪贴板记录持久收藏与淘汰保护",
       "description": "支持单条与批量收藏星标，自动豁免 FIFO 历史淘汰，独立收藏夹展示，批量删除默认保留收藏项",
-      "status": "已实现",
+      "status": "已部署",
       "priority": "P0",
       "verified": true,
-      "deployed": false
+      "deployed": true
     },
     {
       "id": "REQ-012",
       "category": "智能模板",
       "title": "常用提示词与智能变量模板库",
       "description": "支持种子模板内置与自定义维护，智能识别 {clip} 与自定义插槽变量，弹出动态参数表单填充并合成写入剪贴板",
-      "status": "已实现",
+      "status": "已部署",
       "priority": "P0",
       "verified": true,
-      "deployed": false
+      "deployed": true
     }
   ]
 }
