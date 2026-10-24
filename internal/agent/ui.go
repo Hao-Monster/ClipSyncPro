@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +79,12 @@ func (a *Agent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleBatchDelete(w, r)
 	case strings.HasPrefix(path, "/api/records/"):
 		a.handleRecordAction(w, r, strings.TrimPrefix(path, "/api/records/"))
+	case path == "/api/prompts" && r.Method == http.MethodGet:
+		a.handleListPrompts(w, r)
+	case path == "/api/prompts" && r.Method == http.MethodPost:
+		a.handleSavePrompt(w, r)
+	case strings.HasPrefix(path, "/api/prompts/"):
+		a.handlePromptAction(w, r, strings.TrimPrefix(path, "/api/prompts/"))
 	default:
 		writeAgentJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -143,6 +151,8 @@ type recordView struct {
 	ContentType     domain.ContentType        `json:"content_type"`
 	IsSensitive     bool                      `json:"is_sensitive"`
 	SensitiveType   domain.SensitiveType      `json:"sensitive_type,omitempty"`
+	IsFavorite      bool                      `json:"is_favorite"`
+	FavoriteAt      *time.Time                `json:"favorite_at,omitempty"`
 	SourcePlatform  domain.Platform           `json:"source_platform"`
 	ClientCreatedAt string                    `json:"client_created_at"`
 	DisplayTime     string                    `json:"display_time"`
@@ -175,6 +185,8 @@ func (a *Agent) handleRecords(w http.ResponseWriter, r *http.Request) {
 			ContentType:     rec.ContentType,
 			IsSensitive:     rec.IsSensitive,
 			SensitiveType:   rec.SensitiveType,
+			IsFavorite:      rec.IsFavorite,
+			FavoriteAt:      rec.FavoriteAt,
 			SourcePlatform:  rec.SourcePlatform,
 			ClientCreatedAt: domain.FormatMinute(rec.ClientCreatedAt),
 			DisplayTime:     rec.ClientCreatedAt.Local().Format("2006-01-02 15:04"),
@@ -204,7 +216,17 @@ func (a *Agent) filterFromRequest(w http.ResponseWriter, r *http.Request) (stora
 	filter := storage.Filter{
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		SensitiveOnly: q.Get("sensitive") == "true",
+		FavoriteOnly:  q.Get("favorite") == "true",
 		Limit:         10,
+		Offset:        0,
+	}
+	if rawOffset := q.Get("offset"); rawOffset != "" {
+		offset, err := strconv.Atoi(rawOffset)
+		if err != nil || offset < 0 {
+			writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid offset"})
+			return storage.Filter{}, false
+		}
+		filter.Offset = offset
 	}
 	if rawDate := q.Get("date"); rawDate != "" {
 		start, end, err := domain.ParseFilterDate(rawDate)
@@ -246,6 +268,8 @@ func (a *Agent) handleRecordAction(w http.ResponseWriter, r *http.Request, tail 
 		a.handleCopy(w, r, id)
 	case action == "paste" && r.Method == http.MethodPost:
 		a.handlePaste(w, r, id)
+	case action == "favorite" && r.Method == http.MethodPost:
+		a.handleSetFavorite(w, r, id)
 	default:
 		writeAgentJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -366,6 +390,23 @@ func (a *Agent) handleCopy(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func (a *Agent) handlePaste(w http.ResponseWriter, r *http.Request, id string) {
+	var body struct {
+		Field      string `json:"field"`
+		TargetHWND uint64 `json:"target_hwnd"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if body.Field == "" {
+		body.Field = "content"
+	}
+	if body.TargetHWND != 0 {
+		if err := win32.FocusWindow(uintptr(body.TargetHWND)); err != nil {
+			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": "target window focus failed"})
+			return
+		}
+	}
 	if rec, err := a.store.GetRecord(r.Context(), id); err == nil && rec.ContentType == domain.ContentImage {
 		mimeType, data, err := domain.DecodeClipboardRecordImage(rec)
 		if err != nil {
@@ -379,7 +420,7 @@ func (a *Agent) handlePaste(w http.ResponseWriter, r *http.Request, id string) {
 		writeAgentJSON(w, http.StatusOK, map[string]string{"status": "pasted"})
 		return
 	}
-	text, err := a.textForAction(r, id)
+	text, err := a.textForActionField(r.Context(), id, body.Field)
 	if err != nil {
 		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -400,7 +441,11 @@ func (a *Agent) textForAction(r *http.Request, id string) (string, error) {
 	if body.Field == "" {
 		body.Field = "content"
 	}
-	rec, err := a.store.GetRecord(r.Context(), id)
+	return a.textForActionField(r.Context(), id, body.Field)
+}
+
+func (a *Agent) textForActionField(ctx context.Context, id, field string) (string, error) {
+	rec, err := a.store.GetRecord(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -411,7 +456,7 @@ func (a *Agent) textForAction(r *http.Request, id string) (string, error) {
 	if !ok {
 		return "", app.ErrRevealRequired
 	}
-	switch body.Field {
+	switch field {
 	case "content":
 		return revealed.Content, nil
 	case "account":
@@ -430,6 +475,7 @@ func (a *Agent) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		IDs           []string `json:"ids"`
 		SkipSensitive bool     `json:"skip_sensitive"`
+		SkipFavorite  bool     `json:"skip_favorite"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -437,13 +483,19 @@ func (a *Agent) handleBatchDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	ids := body.IDs
 	skipped := 0
-	if body.SkipSensitive {
+	if body.SkipSensitive || body.SkipFavorite {
 		ids = make([]string, 0, len(body.IDs))
 		for _, id := range body.IDs {
 			rec, err := a.store.GetRecord(r.Context(), id)
-			if err == nil && rec.IsSensitive {
-				skipped++
-				continue
+			if err == nil {
+				if body.SkipSensitive && rec.IsSensitive {
+					skipped++
+					continue
+				}
+				if body.SkipFavorite && rec.IsFavorite {
+					skipped++
+					continue
+				}
 			}
 			ids = append(ids, id)
 		}
@@ -542,6 +594,84 @@ func writeAgentCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+}
+
+func (a *Agent) handleSetFavorite(w http.ResponseWriter, r *http.Request, id string) {
+	defer r.Body.Close()
+	var body struct {
+		IsFavorite bool `json:"is_favorite"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := a.store.SetFavorite(r.Context(), id, body.IsFavorite); err != nil {
+		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if rec, err := a.store.GetRecord(r.Context(), id); err == nil {
+		a.broadcastRecordUpdated(rec)
+	}
+	writeAgentJSON(w, http.StatusOK, map[string]any{"status": "ok", "is_favorite": body.IsFavorite})
+}
+
+func (a *Agent) handleListPrompts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	category := q.Get("category")
+	keyword := q.Get("keyword")
+	prompts, err := a.store.ListPrompts(r.Context(), category, keyword)
+	if err != nil {
+		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAgentJSON(w, http.StatusOK, map[string]any{"prompts": prompts})
+}
+
+func (a *Agent) handleSavePrompt(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var p domain.PromptTemplate
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.TemplateContent) == "" {
+		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "title and template_content are required"})
+		return
+	}
+	if err := a.store.SavePrompt(r.Context(), &p); err != nil {
+		writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAgentJSON(w, http.StatusOK, p)
+}
+
+func (a *Agent) handlePromptAction(w http.ResponseWriter, r *http.Request, tail string) {
+	parts := strings.Split(tail, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeAgentJSON(w, http.StatusBadRequest, map[string]string{"error": "prompt id is required"})
+		return
+	}
+	id := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+	switch {
+	case action == "" && r.Method == http.MethodDelete:
+		if err := a.store.DeletePrompt(r.Context(), id); err != nil {
+			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeAgentJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	case action == "use" && r.Method == http.MethodPost:
+		if err := a.store.IncrementPromptUsage(r.Context(), id); err != nil {
+			writeAgentJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeAgentJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
+	default:
+		writeAgentJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
 }
 
 var indexTemplate = template.Must(template.New("index").Parse(indexHTML))

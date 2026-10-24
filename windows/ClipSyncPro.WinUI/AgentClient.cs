@@ -25,7 +25,7 @@ public sealed class AgentClient
         return await GetAsync<AgentStatus>("api/status", cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ClipboardRecordView>> ListAsync(string keyword, string date, bool sensitiveOnly, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ClipboardRecordView>> ListAsync(string keyword, string date, bool sensitiveOnly, bool favoriteOnly, int offset, CancellationToken cancellationToken)
     {
         var query = new List<string>();
         if (!string.IsNullOrWhiteSpace(keyword))
@@ -40,9 +40,51 @@ public sealed class AgentClient
         {
             query.Add("sensitive=true");
         }
+        if (favoriteOnly)
+        {
+            query.Add("favorite=true");
+        }
+        query.Add("offset=" + offset);
         var suffix = query.Count == 0 ? "" : "?" + string.Join("&", query);
         var result = await GetAsync<RecordsResponse>("api/records" + suffix, cancellationToken);
         return result.Records;
+    }
+
+    public Task SetFavoriteAsync(string id, bool isFavorite, CancellationToken cancellationToken)
+    {
+        return PostNoContentAsync($"api/records/{Uri.EscapeDataString(id)}/favorite", new { is_favorite = isFavorite }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<PromptView>> ListPromptsAsync(string category, string keyword, CancellationToken cancellationToken)
+    {
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            query.Add("category=" + Uri.EscapeDataString(category.Trim()));
+        }
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            query.Add("keyword=" + Uri.EscapeDataString(keyword.Trim()));
+        }
+        var suffix = query.Count == 0 ? "" : "?" + string.Join("&", query);
+        var result = await GetAsync<PromptsResponse>("api/prompts" + suffix, cancellationToken);
+        return result.Prompts;
+    }
+
+    public Task<PromptView> SavePromptAsync(PromptView prompt, CancellationToken cancellationToken)
+    {
+        return PostAsync<PromptView>("api/prompts", prompt, cancellationToken);
+    }
+
+    public async Task DeletePromptAsync(string id, CancellationToken cancellationToken)
+    {
+        using var response = await _http.DeleteAsync($"api/prompts/{Uri.EscapeDataString(id)}", cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+    }
+
+    public Task UsePromptAsync(string id, CancellationToken cancellationToken)
+    {
+        return PostNoContentAsync($"api/prompts/{Uri.EscapeDataString(id)}/use", new { }, cancellationToken);
     }
 
     public Task<RevealedSensitive> RevealAsync(string id, CancellationToken cancellationToken)
@@ -70,9 +112,9 @@ public sealed class AgentClient
         return PostNoContentAsync($"api/records/{Uri.EscapeDataString(id)}/copy", new { field }, cancellationToken);
     }
 
-    public Task PasteAsync(string id, string field, CancellationToken cancellationToken)
+    public Task PasteAsync(string id, string field, ulong targetHwnd, CancellationToken cancellationToken)
     {
-        return PostNoContentAsync($"api/records/{Uri.EscapeDataString(id)}/paste", new { field }, cancellationToken);
+        return PostNoContentAsync($"api/records/{Uri.EscapeDataString(id)}/paste", new { field, target_hwnd = targetHwnd }, cancellationToken);
     }
 
     public async Task DeleteAsync(string id, CancellationToken cancellationToken)
@@ -81,9 +123,9 @@ public sealed class AgentClient
         await EnsureSuccessAsync(response, cancellationToken);
     }
 
-    public Task BatchDeleteAsync(IEnumerable<string> ids, bool skipSensitive, CancellationToken cancellationToken)
+    public Task BatchDeleteAsync(IEnumerable<string> ids, bool skipSensitive, bool skipFavorite, CancellationToken cancellationToken)
     {
-        return PostNoContentAsync("api/records/batch-delete", new { ids = ids.ToArray(), skip_sensitive = skipSensitive }, cancellationToken);
+        return PostNoContentAsync("api/records/batch-delete", new { ids = ids.ToArray(), skip_sensitive = skipSensitive, skip_favorite = skipFavorite }, cancellationToken);
     }
 
     public Task CaptureCurrentAsync(CancellationToken cancellationToken)
@@ -203,6 +245,18 @@ public sealed class ClipboardRecordView
     [JsonPropertyName("is_sensitive")]
     public bool IsSensitive { get; set; }
 
+    [JsonPropertyName("is_favorite")]
+    public bool IsFavorite { get; set; }
+
+    [JsonPropertyName("favorite_at")]
+    public DateTime? FavoriteAt { get; set; }
+
+    public string IsFavoriteGlyph => IsFavorite ? "\uE735" : "\uE734";
+
+    public string IsFavoriteBrush => IsFavorite ? "#FFB900" : "#8A8A8A";
+
+    public string StarToolTip => IsFavorite ? "取消收藏" : "加入收藏";
+
     [JsonPropertyName("sensitive_type")]
     public string SensitiveType { get; set; } = "";
 
@@ -269,3 +323,42 @@ public sealed class RevealedSensitive
     [JsonPropertyName("expires")]
     public string Expires { get; set; } = "";
 }
+
+public sealed class PromptsResponse
+{
+    [JsonPropertyName("prompts")]
+    public List<PromptView> Prompts { get; set; } = [];
+}
+
+public sealed class PromptView
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "";
+
+    [JsonPropertyName("category")]
+    public string Category { get; set; } = "通用";
+
+    [JsonPropertyName("template_content")]
+    public string TemplateContent { get; set; } = "";
+
+    [JsonPropertyName("variables")]
+    public List<string> Variables { get; set; } = [];
+
+    [JsonPropertyName("shortcut")]
+    public string Shortcut { get; set; } = "";
+
+    [JsonPropertyName("usage_count")]
+    public int UsageCount { get; set; }
+
+    [JsonPropertyName("is_favorite")]
+    public bool IsFavorite { get; set; }
+
+    public string VariablesSummary => Variables.Count > 0 ? "插槽: " + string.Join(", ", Variables) : "无变量";
+
+    public string UsageSummary => $"调用 {UsageCount} 次";
+}
+
+

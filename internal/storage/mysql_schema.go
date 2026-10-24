@@ -22,11 +22,29 @@ CREATE TABLE IF NOT EXISTS clipboard_record (
     server_created_at DATETIME(3) NULL,
     updated_at DATETIME(3) NOT NULL,
     deleted_at DATETIME(3) NULL,
+    is_favorite TINYINT(1) NOT NULL DEFAULT 0,
+    favorite_at DATETIME(3) NULL,
     sync_status VARCHAR(32) NOT NULL DEFAULT 'pending',
     INDEX idx_user_created_at (user_id, client_created_at),
     INDEX idx_hash (content_hash),
     INDEX idx_sensitive (user_id, is_sensitive, sensitive_type),
+    INDEX idx_favorite (user_id, is_favorite, favorite_at),
     INDEX idx_sync_status (sync_status)
+);
+
+CREATE TABLE IF NOT EXISTS prompt_template (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(128) NOT NULL,
+    category VARCHAR(64) NOT NULL DEFAULT '通用',
+    template_content LONGTEXT NOT NULL,
+    variables_json LONGTEXT NULL,
+    shortcut VARCHAR(64) NULL,
+    usage_count INT NOT NULL DEFAULT 0,
+    is_favorite TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    INDEX idx_prompts_category (category),
+    INDEX idx_prompts_usage (usage_count, updated_at)
 );
 
 CREATE TABLE IF NOT EXISTS sync_queue_v2 (

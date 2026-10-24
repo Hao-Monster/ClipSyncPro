@@ -80,6 +80,8 @@ type ClipboardRecord struct {
 	ServerCreatedAt *time.Time    `json:"server_created_at,omitempty"`
 	UpdatedAt       time.Time     `json:"updated_at"`
 	DeletedAt       *time.Time    `json:"deleted_at,omitempty"`
+	IsFavorite      bool          `json:"is_favorite"`
+	FavoriteAt      *time.Time    `json:"favorite_at,omitempty"`
 	SyncStatus      SyncStatus    `json:"sync_status"`
 }
 

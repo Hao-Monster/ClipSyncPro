@@ -26,10 +26,13 @@ public sealed partial class MainWindow : Window
     private const int SwRestore = 9;
     private const int DwmwaSystemBackdropType = 38;
     private const int DwmSbtTransientWindow = 3;
+    private const int MonitorDefaultToNearest = 2;
+    private const int WindowEdgeMargin = 24;
 
     private readonly IntPtr _hwnd;
     private readonly WndProcDelegate _wndProc;
     private readonly IntPtr _oldWndProc;
+    private IntPtr _pasteTargetHwnd;
     private bool _minimizedByHotkey;
 
     public MainWindow()
@@ -42,8 +45,12 @@ public sealed partial class MainWindow : Window
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 800));
+
         _hwnd = WindowNative.GetWindowHandle(this);
+        _pasteTargetHwnd = GetForegroundWindow();
         ConfigureAcrylicWindow();
+        PositionTopRight();
         _wndProc = WndProc;
         _oldWndProc = SetWindowLongPtr(_hwnd, GwlpWndProc, Marshal.GetFunctionPointerForDelegate(_wndProc));
         _ = RegisterHotKey(_hwnd, HotkeyID, ModAlt | ModNoRepeat, VkV);
@@ -51,6 +58,26 @@ public sealed partial class MainWindow : Window
 
         // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
+    }
+
+    private void PositionTopRight()
+    {
+        var monitor = MonitorFromWindow(_hwnd, MonitorDefaultToNearest);
+        if (monitor == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var monitorInfo = new MonitorInfo { CbSize = Marshal.SizeOf<MonitorInfo>() };
+        if (!GetMonitorInfo(monitor, ref monitorInfo))
+        {
+            return;
+        }
+
+        var size = AppWindow.Size;
+        var x = monitorInfo.WorkArea.Right - size.Width - WindowEdgeMargin;
+        var y = monitorInfo.WorkArea.Top + WindowEdgeMargin;
+        AppWindow.Move(new Windows.Graphics.PointInt32(x, y));
     }
 
     private void ConfigureAcrylicWindow()
@@ -87,12 +114,41 @@ public sealed partial class MainWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, uint msg, UIntPtr wParam, IntPtr lParam)
     {
+        if (msg == 0x0006 && (wParam.ToUInt32() & 0xFFFF) == 0)
+        {
+            CapturePasteTarget();
+        }
+
+        if (msg == 0x0010) { ShowWindow(_hwnd, SwMinimize); _minimizedByHotkey = true; return IntPtr.Zero; }
+
         if (msg == WmHotkey && wParam.ToUInt32() == HotkeyID)
         {
+            CapturePasteTarget();
             ToggleVisible();
             return IntPtr.Zero;
         }
         return CallWindowProc(_oldWndProc, hwnd, msg, wParam, lParam);
+    }
+
+    public void FocusPasteTarget()
+    {
+        if (_pasteTargetHwnd == IntPtr.Zero || _pasteTargetHwnd == _hwnd)
+        {
+            return;
+        }
+
+        SetForegroundWindow(_pasteTargetHwnd);
+    }
+
+    public ulong PasteTargetHandle => unchecked((ulong)_pasteTargetHwnd.ToInt64());
+
+    private void CapturePasteTarget()
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground != IntPtr.Zero && foreground != _hwnd)
+        {
+            _pasteTargetHwnd = foreground;
+        }
     }
 
     private void ToggleVisible()
@@ -130,8 +186,38 @@ public sealed partial class MainWindow : Window
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hWnd, int dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MonitorInfo
+    {
+        public int CbSize;
+        public RectI Monitor;
+        public RectI WorkArea;
+        public int Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RectI
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 }
+
+
+

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,17 +13,23 @@ import (
 type MemoryStore struct {
 	mu      sync.RWMutex
 	records map[string]domain.ClipboardRecord
+	prompts map[string]*domain.PromptTemplate
 	queue   []SyncQueueItem
 	nextID  int64
 	now     func() time.Time
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+	store := &MemoryStore{
 		records: make(map[string]domain.ClipboardRecord),
+		prompts: make(map[string]*domain.PromptTemplate),
 		nextID:  1,
 		now:     time.Now,
 	}
+	for _, p := range domain.DefaultPrompts() {
+		store.prompts[p.ID] = p
+	}
+	return store
 }
 
 func (s *MemoryStore) UpsertRecord(_ context.Context, rec domain.ClipboardRecord) error {
@@ -59,6 +66,13 @@ func (s *MemoryStore) ListRecords(_ context.Context, filter Filter) ([]domain.Cl
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].ClientCreatedAt.After(records[j].ClientCreatedAt)
 	})
+	if filter.Offset > 0 {
+		if filter.Offset >= len(records) {
+			records = nil
+		} else {
+			records = records[filter.Offset:]
+		}
+	}
 	if filter.Limit > 0 && len(records) > filter.Limit {
 		records = records[:filter.Limit]
 	}
@@ -168,5 +182,103 @@ func (s *MemoryStore) MarkQueueRetry(_ context.Context, id int64, errText string
 			return nil
 		}
 	}
+	return nil
+}
+
+func (s *MemoryStore) SetFavorite(_ context.Context, id string, isFavorite bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.records[id]
+	if !ok {
+		return ErrNotFound
+	}
+	rec.IsFavorite = isFavorite
+	if isFavorite {
+		now := s.now()
+		rec.FavoriteAt = &now
+	} else {
+		rec.FavoriteAt = nil
+	}
+	rec.UpdatedAt = s.now()
+	s.records[id] = rec
+	return nil
+}
+
+func (s *MemoryStore) ListPrompts(_ context.Context, category, keyword string) ([]*domain.PromptTemplate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list := make([]*domain.PromptTemplate, 0, len(s.prompts))
+	cat := strings.TrimSpace(category)
+	kw := strings.ToLower(strings.TrimSpace(keyword))
+	for _, p := range s.prompts {
+		if cat != "" && cat != "全部" && p.Category != cat {
+			continue
+		}
+		if kw != "" {
+			if !strings.Contains(strings.ToLower(p.Title), kw) &&
+				!strings.Contains(strings.ToLower(p.TemplateContent), kw) &&
+				!strings.Contains(strings.ToLower(p.Shortcut), kw) {
+				continue
+			}
+		}
+		copied := *p
+		list = append(list, &copied)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].IsFavorite != list[j].IsFavorite {
+			return list[i].IsFavorite
+		}
+		if list[i].UsageCount != list[j].UsageCount {
+			return list[i].UsageCount > list[j].UsageCount
+		}
+		return list[i].UpdatedAt.After(list[j].UpdatedAt)
+	})
+	return list, nil
+}
+
+func (s *MemoryStore) GetPrompt(_ context.Context, id string) (*domain.PromptTemplate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.prompts[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	copied := *p
+	return &copied, nil
+}
+
+func (s *MemoryStore) SavePrompt(_ context.Context, prompt *domain.PromptTemplate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prompt.ID == "" {
+		newP := domain.NewPromptTemplate(prompt.Title, prompt.Category, prompt.TemplateContent, prompt.Shortcut)
+		newP.IsFavorite = prompt.IsFavorite
+		*prompt = *newP
+	}
+	prompt.UpdatedAt = s.now()
+	if prompt.CreatedAt.IsZero() {
+		prompt.CreatedAt = prompt.UpdatedAt
+	}
+	prompt.Variables = domain.ExtractVariables(prompt.TemplateContent)
+	s.prompts[prompt.ID] = prompt
+	return nil
+}
+
+func (s *MemoryStore) DeletePrompt(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.prompts, id)
+	return nil
+}
+
+func (s *MemoryStore) IncrementPromptUsage(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.prompts[id]
+	if !ok {
+		return ErrNotFound
+	}
+	p.UsageCount++
+	p.UpdatedAt = s.now()
 	return nil
 }

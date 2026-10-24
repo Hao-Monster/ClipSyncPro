@@ -223,3 +223,126 @@ func TestAgentListsAndServesImageWithoutEmbeddingItInList(t *testing.T) {
 		t.Fatalf("unexpected image response: status=%d type=%q data=%x", content.Code, content.Header().Get("Content-Type"), content.Body.Bytes())
 	}
 }
+
+func TestAgentFavoriteFlowAndBatchDeleteProtection(t *testing.T) {
+	store := storage.NewMemoryStore()
+	a := New(store, Config{Secret: "secret", DeviceID: "dev-1"})
+	ctx := context.Background()
+
+	normalRec, err := a.service.CaptureText(ctx, "normal clipboard item")
+	if err != nil {
+		t.Fatal(err)
+	}
+	favRec, err := a.service.CaptureText(ctx, "starred snippet")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 设置为收藏
+	favBody := []byte(`{"is_favorite": true}`)
+	rr := httptest.NewRecorder()
+	a.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/records/"+favRec.ID+"/favorite", bytes.NewReader(favBody)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("favorite record failed: %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	// 2. 按 favorite=true 筛选
+	listRr := httptest.NewRecorder()
+	a.ServeHTTP(listRr, httptest.NewRequest(http.MethodGet, "/api/records?favorite=true", nil))
+	if listRr.Code != http.StatusOK {
+		t.Fatalf("list favorite records failed: %d", listRr.Code)
+	}
+	var favListResp struct {
+		Records []struct {
+			ID         string `json:"id"`
+			IsFavorite bool   `json:"is_favorite"`
+		} `json:"records"`
+	}
+	if err := json.NewDecoder(listRr.Body).Decode(&favListResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(favListResp.Records) != 1 || favListResp.Records[0].ID != favRec.ID || !favListResp.Records[0].IsFavorite {
+		t.Fatalf("unexpected favorite filter result: %+v", favListResp)
+	}
+
+	// 3. 批量删除并跳过收藏记录
+	batchBody := []byte(`{"ids":["` + normalRec.ID + `","` + favRec.ID + `"],"skip_favorite":true}`)
+	delRr := httptest.NewRecorder()
+	a.ServeHTTP(delRr, httptest.NewRequest(http.MethodPost, "/api/records/batch-delete", bytes.NewReader(batchBody)))
+	if delRr.Code != http.StatusOK {
+		t.Fatalf("batch delete failed: %d, %s", delRr.Code, delRr.Body.String())
+	}
+	var batchResp struct {
+		Count   int `json:"count"`
+		Skipped int `json:"skipped"`
+	}
+	if err := json.NewDecoder(delRr.Body).Decode(&batchResp); err != nil {
+		t.Fatal(err)
+	}
+	if batchResp.Count != 1 || batchResp.Skipped != 1 {
+		t.Fatalf("unexpected batch delete counts: %+v", batchResp)
+	}
+
+	// normalRec 应该被删除，favRec 依然存在
+	if _, err := store.GetRecord(ctx, normalRec.ID); err != storage.ErrNotFound {
+		t.Fatalf("normal record should be deleted, got err %v", err)
+	}
+	if _, err := store.GetRecord(ctx, favRec.ID); err != nil {
+		t.Fatalf("favorite record must be preserved: %v", err)
+	}
+}
+
+func TestAgentPromptTemplatesFlow(t *testing.T) {
+	store := storage.NewMemoryStore()
+	a := New(store, Config{Secret: "secret", DeviceID: "dev-1"})
+
+	// 1. 获取默认提示词
+	listRr := httptest.NewRecorder()
+	a.ServeHTTP(listRr, httptest.NewRequest(http.MethodGet, "/api/prompts", nil))
+	if listRr.Code != http.StatusOK {
+		t.Fatalf("list prompts failed: %d", listRr.Code)
+	}
+	var listResp struct {
+		Prompts []domain.PromptTemplate `json:"prompts"`
+	}
+	if err := json.NewDecoder(listRr.Body).Decode(&listResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(listResp.Prompts) == 0 {
+		t.Fatal("expected default prompts to be populated")
+	}
+
+	// 2. 创建新提示词
+	newPrompt := domain.NewPromptTemplate("SQL 优化专家", "数据库", "请优化以下 SQL 查询：\n\n{sql}", "/sql")
+	body, _ := json.Marshal(newPrompt)
+	saveRr := httptest.NewRecorder()
+	a.ServeHTTP(saveRr, httptest.NewRequest(http.MethodPost, "/api/prompts", bytes.NewReader(body)))
+	if saveRr.Code != http.StatusOK {
+		t.Fatalf("save prompt failed: %d, body: %s", saveRr.Code, saveRr.Body.String())
+	}
+
+	// 3. 调用计数自增
+	useRr := httptest.NewRecorder()
+	a.ServeHTTP(useRr, httptest.NewRequest(http.MethodPost, "/api/prompts/"+newPrompt.ID+"/use", nil))
+	if useRr.Code != http.StatusOK {
+		t.Fatalf("use prompt failed: %d", useRr.Code)
+	}
+	p, err := store.GetPrompt(context.Background(), newPrompt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.UsageCount != 1 {
+		t.Fatalf("expected usage count = 1, got %d", p.UsageCount)
+	}
+
+	// 4. 删除提示词
+	delRr := httptest.NewRecorder()
+	a.ServeHTTP(delRr, httptest.NewRequest(http.MethodDelete, "/api/prompts/"+newPrompt.ID, nil))
+	if delRr.Code != http.StatusOK {
+		t.Fatalf("delete prompt failed: %d", delRr.Code)
+	}
+	if _, err := store.GetPrompt(context.Background(), newPrompt.ID); err != storage.ErrNotFound {
+		t.Fatalf("expected prompt to be deleted, got err %v", err)
+	}
+}
+

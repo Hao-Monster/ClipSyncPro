@@ -18,8 +18,10 @@ type Filter struct {
 	DateStart      *time.Time
 	DateEnd        *time.Time
 	SensitiveOnly  bool
+	FavoriteOnly   bool
 	IncludeDeleted bool
 	Limit          int
+	Offset         int
 }
 
 type QueueAction string
@@ -57,10 +59,16 @@ type Store interface {
 	ListRecords(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error)
 	ListRecordSummaries(ctx context.Context, filter Filter) ([]domain.ClipboardRecord, error)
 	DeleteRecords(ctx context.Context, ids []string) error
+	SetFavorite(ctx context.Context, id string, isFavorite bool) error
 	Enqueue(ctx context.Context, item SyncQueueItem) (int64, error)
 	ListPendingQueue(ctx context.Context, limit int) ([]SyncQueueItem, error)
 	MarkQueueDone(ctx context.Context, id int64) error
 	MarkQueueRetry(ctx context.Context, id int64, errText string) error
+	ListPrompts(ctx context.Context, category, keyword string) ([]*domain.PromptTemplate, error)
+	GetPrompt(ctx context.Context, id string) (*domain.PromptTemplate, error)
+	SavePrompt(ctx context.Context, prompt *domain.PromptTemplate) error
+	DeletePrompt(ctx context.Context, id string) error
+	IncrementPromptUsage(ctx context.Context, id string) error
 }
 
 func QueueRetryDelay(retryCount int) time.Duration {
@@ -85,6 +93,9 @@ func RecordMatchesFilter(rec domain.ClipboardRecord, filter Filter) bool {
 		return false
 	}
 	if filter.SensitiveOnly && !rec.IsSensitive {
+		return false
+	}
+	if filter.FavoriteOnly && !rec.IsFavorite {
 		return false
 	}
 	if filter.DateStart != nil && rec.ClientCreatedAt.Before(*filter.DateStart) {

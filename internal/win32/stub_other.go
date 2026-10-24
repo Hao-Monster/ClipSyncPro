@@ -41,6 +41,8 @@ func PasteText(string) error {
 	return errors.New("paste is only implemented on Windows")
 }
 
+func FocusWindow(uintptr) error { return nil }
+
 func PasteImage(string, []byte) error {
 	return errors.New("paste is only implemented on Windows")
 }

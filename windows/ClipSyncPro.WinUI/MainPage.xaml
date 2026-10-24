@@ -22,6 +22,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- 顶部搜索与全局动作 -->
         <Grid ColumnSpacing="10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -32,7 +33,7 @@
                 Height="38"
                 FontSize="15"
                 KeyDown="SearchBox_KeyDown"
-                PlaceholderText="搜索剪贴内容、账户、密码或备注" />
+                PlaceholderText="搜索剪贴历史、收藏、常用提示词或账户密码" />
             <Button
                 Grid.Column="1"
                 MinWidth="92"
@@ -40,92 +41,210 @@
                 Content="刷新" />
         </Grid>
 
-        <ScrollViewer
-            Grid.Row="1"
-            HorizontalScrollBarVisibility="Auto"
-            HorizontalScrollMode="Auto"
-            VerticalScrollBarVisibility="Disabled">
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Click="AllButton_Click" Content="全部" />
-                <Button x:Name="SensitiveButton" Click="SensitiveButton_Click" Content="账户密码" />
+        <!-- 顶部分段导航与常用操作栏 -->
+        <Grid Grid.Row="1" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 核心视图分段导航胶囊 -->
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button x:Name="NavAllButton" Click="NavAll_Click" Content="全部" Style="{ThemeResource AccentButtonStyle}" />
+                <Button x:Name="NavFavoritesButton" Click="NavFavorites_Click" Content="⭐ 收藏夹" />
+                <Button x:Name="NavPromptsButton" Click="NavPrompts_Click" Content="💡 提示词库" />
+                <Button x:Name="NavSensitiveButton" Click="NavSensitive_Click" Content="🔒 账户密码" />
+            </StackPanel>
+
+            <!-- 右侧辅助工具栏 -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="NewPromptButton" Click="NewPromptButton_Click" Content="+ 新建提示词" Visibility="Collapsed" Style="{ThemeResource AccentButtonStyle}"/>
+                <Button x:Name="DateFilterButton" Click="DateButton_Click" Content="按时间筛选" />
                 <Button Click="BatchDeleteButton_Click" Content="批量删除" />
-                <Button Click="DateButton_Click" Content="按时间筛选" />
-                <Button Click="DeleteButton_Click" Content="删除" />
-                <Button Click="PasswordButton_Click" Content="密码" />
-                <Button Click="AccountButton_Click" Content="账户" />
-                <Button Click="ViewButton_Click" Content="查看" />
-                <Button Click="CopyButton_Click" Content="复制" />
-                <Button Click="PasteButton_Click" Content="输入" />
                 <Button Click="CaptureButton_Click" Content="捕获当前" />
             </StackPanel>
-        </ScrollViewer>
+        </Grid>
 
-        <ListView
-            x:Name="RecordsList"
-            Grid.Row="2"
-            Background="Transparent"
-            BorderThickness="0"
-            DoubleTapped="RecordsList_DoubleTapped"
-            IsItemClickEnabled="True"
-            KeyDown="RecordsList_KeyDown"
-            Padding="0"
-            SelectionChanged="RecordsList_SelectionChanged"
-            SelectionMode="Single">
-            <ListView.ItemContainerStyle>
-                <Style TargetType="ListViewItem">
-                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    <Setter Property="MinHeight" Value="54" />
-                    <Setter Property="Padding" Value="8,4" />
-                </Style>
-            </ListView.ItemContainerStyle>
-            <ListView.ItemTemplate>
-                <DataTemplate>
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-							<ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="148" />
-                        </Grid.ColumnDefinitions>
-						<Image
-							Width="{Binding ImagePreviewWidth}"
-							Height="42"
-							Source="{Binding ImageUrl}"
-							Stretch="UniformToFill" />
-                        <StackPanel Grid.Column="1" Spacing="3">
-                            <TextBlock
-                                FontFamily="Cascadia Mono, Consolas"
-                                FontSize="15"
-                                FontWeight="SemiBold"
-                                Text="{Binding Summary}"
-                                TextTrimming="CharacterEllipsis" />
-                            <StackPanel Orientation="Horizontal" Spacing="8">
+        <!-- 主内容区：剪贴板列表 与 提示词库列表双视图容器 -->
+        <Grid Grid.Row="2">
+            <!-- 视图 1：剪贴板历史 / 收藏 / 敏感列表 -->
+            <ListView
+                x:Name="RecordsList" Loaded="RecordsList_Loaded" PointerWheelChanged="RecordsList_PointerWheelChanged"
+                ContainerContentChanging="RecordsList_ContainerContentChanging"
+                Background="Transparent"
+                BorderThickness="0"
+                DoubleTapped="RecordsList_DoubleTapped"
+                IsItemClickEnabled="True"
+                KeyDown="RecordsList_KeyDown"
+                Padding="0"
+                SelectionChanged="RecordsList_SelectionChanged"
+                SelectionMode="Single"
+                Visibility="Visible">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="MinHeight" Value="56" />
+                        <Setter Property="Padding" Value="8,6" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="150" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 收藏星标切换按钮 -->
+                            <Button
+                                Width="34" Height="34"
+                                Padding="0"
+                                Margin="0,0,2,0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                ToolTipService.ToolTip="{Binding StarToolTip}"
+                                Click="RecordStarButton_Click">
+                                <FontIcon Glyph="{Binding IsFavoriteGlyph}" 
+                                          Foreground="{Binding IsFavoriteBrush}" 
+                                          FontSize="16" />
+                            </Button>
+
+                            <!-- 图片缩略图（若有） -->
+                            <Image
+                                Grid.Column="1"
+                                Width="{Binding ImagePreviewWidth}"
+                                Height="42"
+                                Source="{Binding ImageUrl}"
+                                Stretch="UniformToFill" />
+
+                            <!-- 文本正文与元数据 -->
+                            <StackPanel Grid.Column="2" Spacing="3" VerticalAlignment="Center">
                                 <TextBlock
-                                    FontSize="12"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="{Binding KindLabel}" />
-                                <TextBlock
-                                    FontSize="12"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="{Binding SourcePlatform}" />
-                                <TextBlock
-                                    FontSize="12"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="{Binding SyncStatus}" />
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="14"
+                                    FontWeight="SemiBold"
+                                    Text="{Binding Summary}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{Binding KindLabel}" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{Binding SourcePlatform}" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{Binding SyncStatus}" />
+                                </StackPanel>
                             </StackPanel>
-                        </StackPanel>
-                        <TextBlock
-							Grid.Column="2"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center"
-                            FontFamily="Cascadia Mono, Consolas"
-                            FontSize="13"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{Binding DisplayTime}" />
-                    </Grid>
-                </DataTemplate>
-            </ListView.ItemTemplate>
-        </ListView>
 
+                            <!-- 右侧时间与快捷操作 -->
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="6">
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding DisplayTime}" />
+                                <Button
+                                    Width="30" Height="30"
+                                    Padding="0"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    ToolTipService.ToolTip="转为常用提示词"
+                                    Click="RecordConvertToPrompt_Click">
+                                    <FontIcon Glyph="&#xE735;" FontSize="13" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!-- 视图 2：常用提示词库 (AI Prompt Library) -->
+            <Grid x:Name="PromptsContainer" Visibility="Collapsed" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- 提示词分类筛选胶囊 -->
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Auto" VerticalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="PromptCategoryPillPanel" Orientation="Horizontal" Spacing="8">
+                        <Button Click="PromptCatAll_Click" Content="全部" Style="{ThemeResource AccentButtonStyle}"/>
+                        <Button Click="PromptCatDev_Click" Content="代码开发" />
+                        <Button Click="PromptCatTrans_Click" Content="翻译润色" />
+                        <Button Click="PromptCatOffice_Click" Content="日常办公" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- 提示词卡片列表 -->
+                <ListView
+                    x:Name="PromptsList"
+                    Grid.Row="1"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    IsItemClickEnabled="True"
+                    ItemClick="PromptsList_ItemClick"
+                    DoubleTapped="PromptsList_DoubleTapped"
+                    SelectionMode="Single"
+                    Padding="0">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="MinHeight" Value="72" />
+                            <Setter Property="Padding" Value="10,8" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2" Padding="14,10" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- 标题、分类、内容与插槽 -->
+                                <StackPanel Spacing="5">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="15" />
+                                        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="6,2">
+                                            <TextBlock Text="{Binding Category}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </Border>
+                                        <TextBlock Text="{Binding Shortcut}" FontSize="12" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding UsageSummary}" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+
+                                    <!-- 模板正文预览 -->
+                                    <TextBlock Text="{Binding TemplateContent}" MaxLines="2" TextTrimming="CharacterEllipsis" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+
+                                    <!-- 变量插槽提示 -->
+                                    <TextBlock Text="{Binding VariablesSummary}" FontSize="11" Foreground="{ThemeResource AccentTextFillColorTertiaryBrush}" />
+                                </StackPanel>
+
+                                <!-- 右侧操作按钮组 -->
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <Button Content="调用" Click="ExecutePromptButton_Click" Style="{ThemeResource AccentButtonStyle}"/>
+                                    <Button ToolTipService.ToolTip="编辑" Click="EditPromptButton_Click">
+                                        <FontIcon Glyph="&#xE70F;" FontSize="13" />
+                                    </Button>
+                                    <Button ToolTipService.ToolTip="删除" Click="DeletePromptButton_Click">
+                                        <FontIcon Glyph="&#xE74D;" FontSize="13" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </Grid>
+
+        <!-- 底部状态指示 -->
         <Grid Grid.Row="3" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />

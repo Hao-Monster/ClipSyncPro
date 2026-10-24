@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -158,6 +159,12 @@ func (s *Server) filterFromQuery(w http.ResponseWriter, r *http.Request) (storag
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		SensitiveOnly: q.Get("sensitive") == "true" || q.Get("sensitive") == "1",
 		Limit:         10,
+		Offset:        0,
+	}
+	if raw := q.Get("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			filter.Offset = n
+		}
 	}
 	if filter.UserID == "" {
 		filter.UserID = "local"

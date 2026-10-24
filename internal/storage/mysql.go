@@ -135,14 +135,26 @@ func (s *MySQLStore) EnsureSchema(ctx context.Context) error {
 	}{
 		{name: "image_mime", definition: "VARCHAR(64) NULL AFTER content_text"},
 		{name: "image_blob", definition: "LONGBLOB NULL AFTER image_mime"},
+		{name: "is_favorite", definition: "TINYINT(1) NOT NULL DEFAULT 0 AFTER deleted_at"},
+		{name: "favorite_at", definition: "DATETIME(3) NULL AFTER is_favorite"},
 	}
 	for _, column := range columns {
 		if err := s.ensureColumn(ctx, "clipboard_record", column.name, column.definition); err != nil {
 			return err
 		}
 	}
+	if err := s.ensureIndex(ctx, "clipboard_record", "idx_favorite", "(user_id, is_favorite, favorite_at)"); err != nil {
+		return err
+	}
 	if err := s.ensureIndex(ctx, "sync_queue_v2", "idx_sync_queue_schedule", "(status, retry_count, next_attempt_at, created_at)"); err != nil {
 		return err
+	}
+	// 初始化内置提示词种子
+	var promptCount int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM prompt_template").Scan(&promptCount); err == nil && promptCount == 0 {
+		for _, p := range domain.DefaultPrompts() {
+			_ = s.SavePrompt(ctx, p)
+		}
 	}
 	return nil
 }
@@ -266,13 +278,17 @@ func (s *MySQLStore) UpsertRecord(ctx context.Context, rec domain.ClipboardRecor
 	if rec.DeletedAt != nil {
 		deletedAt = *rec.DeletedAt
 	}
+	var favoriteAt any
+	if rec.FavoriteAt != nil {
+		favoriteAt = *rec.FavoriteAt
+	}
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO clipboard_record (
     id, user_id, content_type, content_text, image_mime, image_blob, content_cipher, content_hash,
     is_sensitive, sensitive_type, account_cipher, password_cipher, remark_cipher,
     search_index, source_device_id, source_platform, client_created_at,
-    server_created_at, updated_at, deleted_at, sync_status
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    server_created_at, updated_at, deleted_at, is_favorite, favorite_at, sync_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
     user_id=VALUES(user_id),
     content_type=VALUES(content_type),
@@ -293,11 +309,13 @@ ON DUPLICATE KEY UPDATE
     server_created_at=VALUES(server_created_at),
     updated_at=VALUES(updated_at),
     deleted_at=VALUES(deleted_at),
+    is_favorite=VALUES(is_favorite),
+    favorite_at=VALUES(favorite_at),
     sync_status=VALUES(sync_status)`,
 		rec.ID, rec.UserID, rec.ContentType, nullIfEmpty(contentText), imageMIME, imageData, contentCipher, rec.ContentHash,
 		rec.IsSensitive, nullIfEmpty(string(rec.SensitiveType)), accountCipher, passwordCipher, remarkCipher,
 		string(searchIndex), rec.SourceDeviceID, rec.SourcePlatform, rec.ClientCreatedAt,
-		serverCreatedAt, rec.UpdatedAt, deletedAt, rec.SyncStatus)
+		serverCreatedAt, rec.UpdatedAt, deletedAt, rec.IsFavorite, favoriteAt, rec.SyncStatus)
 	return err
 }
 
@@ -306,7 +324,7 @@ func (s *MySQLStore) GetRecord(ctx context.Context, id string) (domain.Clipboard
 SELECT id, user_id, content_type, content_text, image_mime, image_blob, content_cipher, content_hash,
        is_sensitive, sensitive_type, account_cipher, password_cipher, remark_cipher,
        search_index, source_device_id, source_platform, client_created_at,
-       server_created_at, updated_at, deleted_at, sync_status
+       server_created_at, updated_at, deleted_at, is_favorite, favorite_at, sync_status
 FROM clipboard_record WHERE id = ? LIMIT 1`, id)
 	if err != nil {
 		return domain.ClipboardRecord{}, err
@@ -339,6 +357,9 @@ func (s *MySQLStore) listRecords(ctx context.Context, filter Filter, summariesOn
 	if filter.SensitiveOnly {
 		clauses = append(clauses, "is_sensitive = 1")
 	}
+	if filter.FavoriteOnly {
+		clauses = append(clauses, "is_favorite = 1")
+	}
 	if filter.DateStart != nil {
 		clauses = append(clauses, "client_created_at >= ?")
 		args = append(args, *filter.DateStart)
@@ -365,13 +386,13 @@ SELECT id, user_id, content_type, ` + contentColumn + ` AS content_text,
        content_cipher, content_hash,
        is_sensitive, sensitive_type, account_cipher, password_cipher, remark_cipher,
        search_index, source_device_id, source_platform, client_created_at,
-       server_created_at, updated_at, deleted_at, sync_status
+       server_created_at, updated_at, deleted_at, is_favorite, favorite_at, sync_status
 FROM clipboard_record
 WHERE ` + strings.Join(clauses, " AND ") + `
 ORDER BY client_created_at DESC`
 	if filter.Limit > 0 && filter.Keyword == "" {
-		query += " LIMIT ?"
-		args = append(args, filter.Limit)
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, filter.Limit, filter.Offset)
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -379,12 +400,18 @@ ORDER BY client_created_at DESC`
 	}
 	defer rows.Close()
 	records := make([]domain.ClipboardRecord, 0)
+	matches := 0
 	for rows.Next() {
 		rec, err := scanRecord(rows)
 		if err != nil {
 			return nil, err
 		}
 		if RecordMatchesFilter(rec, filter) {
+			if filter.Keyword != "" && matches < filter.Offset {
+				matches++
+				continue
+			}
+			matches++
 			records = append(records, rec)
 		}
 		if filter.Limit > 0 && len(records) >= filter.Limit {
@@ -499,12 +526,12 @@ func scanRecord(scanner rowScanner) (domain.ClipboardRecord, error) {
 	var rec domain.ClipboardRecord
 	var contentText, imageMIME, contentCipher, sensitiveType, accountCipher, passwordCipher, remarkCipher, searchIndex sql.NullString
 	var imageData []byte
-	var serverCreatedAt, deletedAt sql.NullTime
+	var serverCreatedAt, deletedAt, favoriteAt sql.NullTime
 	if err := scanner.Scan(
 		&rec.ID, &rec.UserID, &rec.ContentType, &contentText, &imageMIME, &imageData, &contentCipher, &rec.ContentHash,
 		&rec.IsSensitive, &sensitiveType, &accountCipher, &passwordCipher, &remarkCipher,
 		&searchIndex, &rec.SourceDeviceID, &rec.SourcePlatform, &rec.ClientCreatedAt,
-		&serverCreatedAt, &rec.UpdatedAt, &deletedAt, &rec.SyncStatus,
+		&serverCreatedAt, &rec.UpdatedAt, &deletedAt, &rec.IsFavorite, &favoriteAt, &rec.SyncStatus,
 	); err != nil {
 		return domain.ClipboardRecord{}, err
 	}
@@ -514,6 +541,7 @@ func scanRecord(scanner rowScanner) (domain.ClipboardRecord, error) {
 	rec.SensitiveType = domain.SensitiveType(sensitiveType.String)
 	rec.ServerCreatedAt = timePtr(serverCreatedAt)
 	rec.DeletedAt = timePtr(deletedAt)
+	rec.FavoriteAt = timePtr(favoriteAt)
 	rec.ContentCipher = parseCipher(contentCipher)
 	rec.AccountCipher = parseCipher(accountCipher)
 	rec.PasswordCipher = parseCipher(passwordCipher)
@@ -586,4 +614,135 @@ func safeDBName(name string) bool {
 
 func safeIdentifier(name string) bool {
 	return dbNamePattern.MatchString(name)
+}
+
+func (s *MySQLStore) SetFavorite(ctx context.Context, id string, isFavorite bool) error {
+	now := time.Now()
+	var favoriteAt any
+	if isFavorite {
+		favoriteAt = now
+	}
+	res, err := s.db.ExecContext(ctx, `
+UPDATE clipboard_record
+SET is_favorite=?, favorite_at=?, updated_at=?
+WHERE id=?`, isFavorite, favoriteAt, now, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *MySQLStore) ListPrompts(ctx context.Context, category, keyword string) ([]*domain.PromptTemplate, error) {
+	clauses := []string{"1=1"}
+	args := make([]any, 0)
+	cat := strings.TrimSpace(category)
+	if cat != "" && cat != "全部" {
+		clauses = append(clauses, "category = ?")
+		args = append(args, cat)
+	}
+	kw := strings.TrimSpace(keyword)
+	if kw != "" {
+		clauses = append(clauses, "(LOWER(title) LIKE ? OR LOWER(template_content) LIKE ? OR LOWER(shortcut) LIKE ?)")
+		pattern := "%" + strings.ToLower(kw) + "%"
+		args = append(args, pattern, pattern, pattern)
+	}
+	query := `
+SELECT id, title, category, template_content, variables_json, shortcut, usage_count, is_favorite, created_at, updated_at
+FROM prompt_template
+WHERE ` + strings.Join(clauses, " AND ") + `
+ORDER BY is_favorite DESC, usage_count DESC, updated_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := make([]*domain.PromptTemplate, 0)
+	for rows.Next() {
+		var p domain.PromptTemplate
+		var variablesJSON, shortcut sql.NullString
+		if err := rows.Scan(&p.ID, &p.Title, &p.Category, &p.TemplateContent, &variablesJSON, &shortcut, &p.UsageCount, &p.IsFavorite, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		p.Shortcut = shortcut.String
+		if variablesJSON.Valid && variablesJSON.String != "" {
+			_ = json.Unmarshal([]byte(variablesJSON.String), &p.Variables)
+		}
+		if p.Variables == nil {
+			p.Variables = domain.ExtractVariables(p.TemplateContent)
+		}
+		list = append(list, &p)
+	}
+	return list, rows.Err()
+}
+
+func (s *MySQLStore) GetPrompt(ctx context.Context, id string) (*domain.PromptTemplate, error) {
+	var p domain.PromptTemplate
+	var variablesJSON, shortcut sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, title, category, template_content, variables_json, shortcut, usage_count, is_favorite, created_at, updated_at
+FROM prompt_template WHERE id = ? LIMIT 1`, id).Scan(
+		&p.ID, &p.Title, &p.Category, &p.TemplateContent, &variablesJSON, &shortcut, &p.UsageCount, &p.IsFavorite, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	p.Shortcut = shortcut.String
+	if variablesJSON.Valid && variablesJSON.String != "" {
+		_ = json.Unmarshal([]byte(variablesJSON.String), &p.Variables)
+	}
+	if p.Variables == nil {
+		p.Variables = domain.ExtractVariables(p.TemplateContent)
+	}
+	return &p, nil
+}
+
+func (s *MySQLStore) SavePrompt(ctx context.Context, prompt *domain.PromptTemplate) error {
+	if prompt.ID == "" {
+		newP := domain.NewPromptTemplate(prompt.Title, prompt.Category, prompt.TemplateContent, prompt.Shortcut)
+		newP.IsFavorite = prompt.IsFavorite
+		*prompt = *newP
+	}
+	prompt.Variables = domain.ExtractVariables(prompt.TemplateContent)
+	varJSON, _ := json.Marshal(prompt.Variables)
+	now := time.Now()
+	prompt.UpdatedAt = now
+	if prompt.CreatedAt.IsZero() {
+		prompt.CreatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO prompt_template (
+    id, title, category, template_content, variables_json, shortcut, usage_count, is_favorite, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    title=VALUES(title),
+    category=VALUES(category),
+    template_content=VALUES(template_content),
+    variables_json=VALUES(variables_json),
+    shortcut=VALUES(shortcut),
+    usage_count=VALUES(usage_count),
+    is_favorite=VALUES(is_favorite),
+    updated_at=VALUES(updated_at)`,
+		prompt.ID, prompt.Title, prompt.Category, prompt.TemplateContent, string(varJSON), nullIfEmpty(prompt.Shortcut),
+		prompt.UsageCount, prompt.IsFavorite, prompt.CreatedAt, prompt.UpdatedAt)
+	return err
+}
+
+func (s *MySQLStore) DeletePrompt(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM prompt_template WHERE id = ?", id)
+	return err
+}
+
+func (s *MySQLStore) IncrementPromptUsage(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE prompt_template SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?", time.Now(), id)
+	return err
 }

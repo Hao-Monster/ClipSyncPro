@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "project": "ClipSync Pro",
+  "work_items": [
+    {
+      "id": "WI-001",
+      "req_id": "REQ-001",
+      "title": "Windows 后台 Agent 剪贴板轮询与图片 BLOB 化存储",
+      "status": "已验证",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "06584f6",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Agent 团队"
+    },
+    {
+      "id": "WI-002",
+      "req_id": "REQ-004",
+      "title": "同步队列 sync_queue_v2 重试与退避优先级调度",
+      "status": "已验证",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "9dea3f2",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Server 团队"
+    },
+    {
+      "id": "WI-003",
+      "req_id": "REQ-008",
+      "title": "本地 Agent 进程监督与 MySQL 降级健康自愈",
+      "status": "已验证",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "03ff4bf",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Agent 团队"
+    },
+    {
+      "id": "WI-004",
+      "req_id": "REQ-005",
+      "title": "WinUI 3 亚克力窗体、右上角停靠与 800x800 初始化",
+      "status": "已实现",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "工作区未提交改动",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Client 团队"
+    },
+    {
+      "id": "WI-005",
+      "req_id": "REQ-006",
+      "title": "双击粘贴时捕获前台窗口 HWND 并激活注入",
+      "status": "已实现",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "工作区未提交改动",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Client 团队"
+    },
+    {
+      "id": "WI-006",
+      "req_id": "REQ-007",
+      "title": "列表右键 ContextFlyout 菜单与键盘快捷键绑定",
+      "status": "已实现",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "工作区未提交改动",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Client 团队"
+    },
+    {
+      "id": "WI-007",
+      "req_id": "REQ-002",
+      "title": "后端 Storage 及 HTTP API 支持 Offset 分页查询",
+      "status": "已实现",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "工作区未提交改动",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Storage 团队"
+    },
+    {
+      "id": "WI-008",
+      "req_id": "REQ-010",
+      "title": "GitHub Actions 自动化 CI/CD 流水线搭建与 bingo-dev 交付",
+      "status": "未完成",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": null,
+      "deployed": false,
+      "acceptance_status": "待开发",
+      "owner": "DevOps 团队"
+    }
+  ]
+}
