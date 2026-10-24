@@ -11,6 +11,11 @@ import (
 	"clipsyncpro/internal/storage"
 )
 
+var (
+	Version = "1.0.0"
+	Commit  = "dev"
+)
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -30,8 +35,9 @@ func main() {
 		store = mysqlStore
 	}
 	server := httpapi.NewServer(store, secret)
+	server.SetVersion(Version, Commit)
 
-	log.Printf("ClipSync Pro server listening on http://%s", addr)
+	log.Printf("ClipSync Pro server listening on http://%s (version: %s, commit: %s)", addr, Version, Commit)
 	if err := httpapi.ListenAndServe(ctx, addr, server); err != nil {
 		log.Fatal(err)
 	}

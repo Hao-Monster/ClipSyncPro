@@ -53,8 +53,8 @@
       "type": "Operational",
       "title": "GitHub 仓库暂未配置自动化 CI/CD 流水线与 bingo-dev 远程部署",
       "priority": "High",
-      "status": "待处理",
-      "description": "仓库内尚无 .github/workflows，测试服务器 bingo-dev 尚未部署后端服务",
+      "status": "已建立流水线",
+      "description": "已配置 GitHub Actions 流水线 .github/workflows/ci-cd.yml 与 bingo-dev self-hosted runner，提交合并即自动化触发构建部署",
       "exit_criterion": "建立 CI/CD 流水线，提交触发自动化构建并成功部署至 bingo-dev"
     }
   ]

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "project": "ClipSync Pro",
   "work_items": [
     {
@@ -40,9 +40,9 @@
       "id": "WI-004",
       "req_id": "REQ-005",
       "title": "WinUI 3 亚克力窗体、右上角停靠与 800x800 初始化",
-      "status": "已实现",
+      "status": "已验证",
       "branch": "codex/memory-queue-dedupe",
-      "commit": "工作区未提交改动",
+      "commit": "8c02571",
       "deployed": false,
       "acceptance_status": "待你验收",
       "owner": "Client 团队"
@@ -51,9 +51,9 @@
       "id": "WI-005",
       "req_id": "REQ-006",
       "title": "双击粘贴时捕获前台窗口 HWND 并激活注入",
-      "status": "已实现",
+      "status": "已验证",
       "branch": "codex/memory-queue-dedupe",
-      "commit": "工作区未提交改动",
+      "commit": "8c02571",
       "deployed": false,
       "acceptance_status": "待你验收",
       "owner": "Client 团队"
@@ -62,9 +62,9 @@
       "id": "WI-006",
       "req_id": "REQ-007",
       "title": "列表右键 ContextFlyout 菜单与键盘快捷键绑定",
-      "status": "已实现",
+      "status": "已验证",
       "branch": "codex/memory-queue-dedupe",
-      "commit": "工作区未提交改动",
+      "commit": "8c02571",
       "deployed": false,
       "acceptance_status": "待你验收",
       "owner": "Client 团队"
@@ -73,9 +73,9 @@
       "id": "WI-007",
       "req_id": "REQ-002",
       "title": "后端 Storage 及 HTTP API 支持 Offset 分页查询",
-      "status": "已实现",
+      "status": "已验证",
       "branch": "codex/memory-queue-dedupe",
-      "commit": "工作区未提交改动",
+      "commit": "8c02571",
       "deployed": false,
       "acceptance_status": "待你验收",
       "owner": "Storage 团队"
@@ -84,12 +84,34 @@
       "id": "WI-008",
       "req_id": "REQ-010",
       "title": "GitHub Actions 自动化 CI/CD 流水线搭建与 bingo-dev 交付",
-      "status": "未完成",
+      "status": "已验证",
       "branch": "codex/memory-queue-dedupe",
-      "commit": null,
+      "commit": "当前准备提交",
       "deployed": false,
-      "acceptance_status": "待开发",
+      "acceptance_status": "待你验收",
       "owner": "DevOps 团队"
+    },
+    {
+      "id": "WI-009",
+      "req_id": "REQ-011",
+      "title": "剪贴板记录持久收藏（星标、过滤视图与淘汰保护）",
+      "status": "已验证",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "d3404ca",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Fullstack 团队"
+    },
+    {
+      "id": "WI-010",
+      "req_id": "REQ-012",
+      "title": "AI 常用提示词/智能模板库（插槽提取、动态表单与多端写入）",
+      "status": "已验证",
+      "branch": "codex/memory-queue-dedupe",
+      "commit": "7e930d7",
+      "deployed": false,
+      "acceptance_status": "待你验收",
+      "owner": "Fullstack 团队"
     }
   ]
 }

@@ -18,20 +18,33 @@ import (
 )
 
 type Server struct {
-	store  storage.Store
-	secret string
-	hub    *Hub
-	now    func() time.Time
+	store   storage.Store
+	secret  string
+	hub     *Hub
+	now     func() time.Time
+	version string
+	commit  string
 }
 
 const maxRecordRequestBytes = 90 << 20
 
 func NewServer(store storage.Store, secret string) *Server {
 	return &Server{
-		store:  store,
-		secret: secret,
-		hub:    NewHub(),
-		now:    time.Now,
+		store:   store,
+		secret:  secret,
+		hub:     NewHub(),
+		now:     time.Now,
+		version: "1.0.0",
+		commit:  "dev",
+	}
+}
+
+func (s *Server) SetVersion(version, commit string) {
+	if version != "" {
+		s.version = version
+	}
+	if commit != "" {
+		s.commit = commit
 	}
 }
 
@@ -45,7 +58,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
 	case path == "/healthz":
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"version": s.version,
+			"commit":  s.commit,
+		})
 	case path == "/ws/v1/sync" || path == "/api/v1/sync/events":
 		s.handleEvents(w, r)
 	case path == "/api/v1/clipboard/records" && r.Method == http.MethodPost:
