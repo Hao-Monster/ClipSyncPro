@@ -16,17 +16,21 @@ import kotlinx.coroutines.withContext
 import pro.clipsync.crypto.SecretBox
 import pro.clipsync.data.ClipboardRepository
 import pro.clipsync.model.ClipboardRecord
+import pro.clipsync.model.PromptTemplate
 
 data class ClipSyncUiState(
     val serverUrl: String = "",
     val secret: String = "",
     val search: String = "",
     val records: List<ClipboardRecord> = emptyList(),
+    val prompts: List<PromptTemplate> = emptyList(),
     val selectedId: String? = null,
+    val activeTab: String = "ALL", // "ALL", "FAVORITE", "PROMPTS"
     val status: String = "未选择",
     val loading: Boolean = false,
     val revealText: String? = null,
     val pendingDelete: ClipboardRecord? = null,
+    val fillPromptDialog: PromptTemplate? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -52,6 +56,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(search = value) }
     }
 
+    fun selectTab(tab: String) {
+        _state.update { it.copy(activeTab = tab, selectedId = null) }
+        if (tab == "PROMPTS") {
+            refreshPrompts()
+        } else {
+            refresh()
+        }
+    }
+
     fun saveConfig() {
         repository.serverUrl = state.value.serverUrl
         repository.secret = state.value.secret
@@ -59,10 +72,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
+        if (state.value.activeTab == "PROMPTS") {
+            refreshPrompts()
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(loading = true) }
+            val isFavorite = state.value.activeTab == "FAVORITE"
             val result = withContext(Dispatchers.IO) {
-                runCatching { repository.api.list(keyword = state.value.search) }
+                runCatching { repository.api.list(keyword = state.value.search, favorite = isFavorite) }
             }
             result.onSuccess { records ->
                 _state.update {
@@ -76,6 +94,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }.onFailure { error ->
                 _state.update { it.copy(loading = false, status = error.message ?: "加载失败") }
             }
+        }
+    }
+
+    fun toggleFavorite(record: ClipboardRecord) {
+        viewModelScope.launch {
+            _state.update { it.copy(loading = true) }
+            val newFav = !record.isFavorite
+            val result = withContext(Dispatchers.IO) {
+                runCatching { repository.api.setFavorite(record.id, newFav) }
+            }
+            result.onSuccess {
+                _state.update { it.copy(loading = false, status = if (newFav) "已加入收藏" else "已取消收藏") }
+                refresh()
+            }.onFailure { error ->
+                _state.update { it.copy(loading = false, status = error.message ?: "操作失败") }
+            }
+        }
+    }
+
+    fun refreshPrompts() {
+        viewModelScope.launch {
+            _state.update { it.copy(loading = true) }
+            val result = withContext(Dispatchers.IO) {
+                runCatching { repository.api.listPrompts(keyword = state.value.search) }
+            }
+            result.onSuccess { prompts ->
+                _state.update {
+                    it.copy(
+                        prompts = prompts,
+                        loading = false,
+                        status = if (prompts.isEmpty()) "暂无提示词" else "已加载 ${prompts.size} 个提示词",
+                    )
+                }
+            }.onFailure { error ->
+                _state.update { it.copy(loading = false, status = error.message ?: "加载提示词失败") }
+            }
+        }
+    }
+
+    fun openPromptFill(prompt: PromptTemplate) {
+        _state.update { it.copy(fillPromptDialog = prompt) }
+    }
+
+    fun dismissPromptFill() {
+        _state.update { it.copy(fillPromptDialog = null) }
+    }
+
+    fun getCurrentClipboardText(): String {
+        val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        return clipboard.primaryClip?.getItemAt(0)?.coerceToText(getApplication())?.toString().orEmpty()
+    }
+
+    fun applyPrompt(prompt: PromptTemplate, finalContent: String) {
+        val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(ClipboardRepository.INTERNAL_CLIP_LABEL, finalContent))
+        _state.update { it.copy(fillPromptDialog = null, status = "提示词已合成并写入剪贴板") }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { repository.api.usePrompt(prompt.id) }
         }
     }
 

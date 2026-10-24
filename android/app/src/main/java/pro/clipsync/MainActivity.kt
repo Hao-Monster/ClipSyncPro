@@ -27,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -38,17 +39,21 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import pro.clipsync.clipboard.ClipboardForegroundService
 import pro.clipsync.model.ClipboardRecord
+import pro.clipsync.model.PromptTemplate
 
 class MainActivity : ComponentActivity() {
     private val viewModel by viewModels<MainViewModel>()
@@ -77,6 +82,12 @@ class MainActivity : ComponentActivity() {
                     onDismissReveal = viewModel::dismissReveal,
                     onConfirmDelete = viewModel::confirmDelete,
                     onCancelDelete = viewModel::cancelDelete,
+                    onTabSelected = viewModel::selectTab,
+                    onToggleFavorite = viewModel::toggleFavorite,
+                    onOpenPromptFill = viewModel::openPromptFill,
+                    onDismissPromptFill = viewModel::dismissPromptFill,
+                    onApplyPrompt = viewModel::applyPrompt,
+                    getClipboardText = viewModel::getCurrentClipboardText,
                 )
             }
         }
@@ -118,6 +129,12 @@ private fun ClipSyncScreen(
     onDismissReveal: () -> Unit,
     onConfirmDelete: () -> Unit,
     onCancelDelete: () -> Unit,
+    onTabSelected: (String) -> Unit,
+    onToggleFavorite: (ClipboardRecord) -> Unit,
+    onOpenPromptFill: (PromptTemplate) -> Unit,
+    onDismissPromptFill: () -> Unit,
+    onApplyPrompt: (PromptTemplate, String) -> Unit,
+    getClipboardText: () -> String,
 ) {
     var markMode by remember { mutableStateOf<String?>(null) }
     var markValue by remember { mutableStateOf("") }
@@ -163,23 +180,50 @@ private fun ClipSyncScreen(
                 singleLine = true,
                 label = { Text("搜索") },
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onSave) { Text("保存配置") }
-                Button(onClick = onRefresh) { Text("刷新") }
-                Button(onClick = onUpload) { Text("上传剪贴板") }
-                Button(onClick = {
-                    markMode = "password"
-                    markValue = ""
-                    markRemark = ""
-                }) { Text("密码") }
-                Button(onClick = {
-                    markMode = "account"
-                    markValue = onGeneratePassword()
-                    markRemark = ""
-                }) { Text("账户") }
-                Button(onClick = onReveal) { Text("查看") }
-                Button(onClick = onCopy) { Text("复制") }
-                Button(onClick = onDelete) { Text("删除") }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = state.activeTab == "ALL",
+                    onClick = { onTabSelected("ALL") },
+                    label = { Text("全部") }
+                )
+                FilterChip(
+                    selected = state.activeTab == "FAVORITE",
+                    onClick = { onTabSelected("FAVORITE") },
+                    label = { Text("⭐ 收藏") }
+                )
+                FilterChip(
+                    selected = state.activeTab == "PROMPTS",
+                    onClick = { onTabSelected("PROMPTS") },
+                    label = { Text("💡 提示词") }
+                )
+            }
+            if (state.activeTab != "PROMPTS") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onSave) { Text("保存配置") }
+                    Button(onClick = onRefresh) { Text("刷新") }
+                    Button(onClick = onUpload) { Text("上传剪贴板") }
+                    Button(onClick = {
+                        markMode = "password"
+                        markValue = ""
+                        markRemark = ""
+                    }) { Text("密码") }
+                    Button(onClick = {
+                        markMode = "account"
+                        markValue = onGeneratePassword()
+                        markRemark = ""
+                    }) { Text("账户") }
+                    Button(onClick = onReveal) { Text("查看") }
+                    Button(onClick = onCopy) { Text("复制") }
+                    Button(onClick = onDelete) { Text("删除") }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onSave) { Text("保存配置") }
+                    Button(onClick = onRefresh) { Text("刷新提示词") }
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -192,19 +236,43 @@ private fun ClipSyncScreen(
                     CircularProgressIndicator(modifier = Modifier.width(22.dp).height(22.dp), strokeWidth = 2.dp)
                 }
             }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(state.records, key = { it.id }) { record ->
-                    RecordRow(
-                        record = record,
-                        selected = record.id == state.selectedId,
-                        onClick = { onSelect(record) },
-                    )
+            if (state.activeTab == "PROMPTS") {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.prompts, key = { it.id }) { prompt ->
+                        PromptRow(
+                            prompt = prompt,
+                            onUse = { onOpenPromptFill(prompt) }
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.records, key = { it.id }) { record ->
+                        RecordRow(
+                            record = record,
+                            selected = record.id == state.selectedId,
+                            onClick = { onSelect(record) },
+                            onToggleFavorite = { onToggleFavorite(record) },
+                        )
+                    }
                 }
             }
         }
+    }
+
+    state.fillPromptDialog?.let { prompt ->
+        PromptFillDialog(
+            prompt = prompt,
+            initialClipText = getClipboardText(),
+            onDismiss = onDismissPromptFill,
+            onConfirm = { onApplyPrompt(prompt, it) }
+        )
     }
 
     state.revealText?.let {
@@ -271,7 +339,12 @@ private fun ClipSyncScreen(
 }
 
 @Composable
-private fun RecordRow(record: ClipboardRecord, selected: Boolean, onClick: () -> Unit) {
+private fun RecordRow(
+    record: ClipboardRecord,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onToggleFavorite: () -> Unit
+) {
     val container = if (selected) {
         MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     } else {
@@ -286,13 +359,24 @@ private fun RecordRow(record: ClipboardRecord, selected: Boolean, onClick: () ->
         elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 1.dp else 0.dp),
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = record.summary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = record.summary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (record.isFavorite) "★" else "☆",
+                    color = if (record.isFavorite) Color(0xFFEAB308) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 22.sp,
+                    modifier = Modifier
+                        .clickable { onToggleFavorite() }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 AssistChip(onClick = {}, label = { Text(record.kindLabel) })
                 AssistChip(onClick = {}, label = { Text(record.sourcePlatform) })
@@ -305,6 +389,104 @@ private fun RecordRow(record: ClipboardRecord, selected: Boolean, onClick: () ->
             }
         }
     }
+}
+
+@Composable
+private fun PromptRow(prompt: PromptTemplate, onUse: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = prompt.title,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                AssistChip(onClick = {}, label = { Text(prompt.category) })
+            }
+            Text(
+                text = prompt.templateContent,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (prompt.variables.isNotEmpty()) {
+                    Text(
+                        text = "变量: " + prompt.variables.joinToString(", "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+                Button(onClick = onUse, shape = RoundedCornerShape(6.dp)) {
+                    Text("使用")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptFillDialog(
+    prompt: PromptTemplate,
+    initialClipText: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    val variableValues = remember {
+        mutableStateMapOf<String, String>().apply {
+            prompt.variables.forEach { v ->
+                if (v == "clip" || v == "input") {
+                    put(v, initialClipText)
+                } else {
+                    put(v, "")
+                }
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    var result = prompt.templateContent
+                    variableValues.forEach { (k, v) ->
+                        result = result.replace("{$k}", v)
+                    }
+                    onConfirm(result)
+                }
+            ) { Text("写入剪贴板") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        title = { Text("参数填充: ${prompt.title}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (prompt.variables.isEmpty()) {
+                    Text("此模板无变量插槽，点击下方按钮将直接写入剪贴板。")
+                } else {
+                    prompt.variables.forEach { variable ->
+                        OutlinedTextField(
+                            value = variableValues[variable] ?: "",
+                            onValueChange = { variableValues[variable] = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("变量 {$variable}") }
+                        )
+                    }
+                }
+            }
+        }
+    )
 }
 
 private val ClipboardRecord.kindLabel: String
