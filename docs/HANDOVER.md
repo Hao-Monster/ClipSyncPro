@@ -440,19 +440,25 @@ sequenceDiagram
   - 本地剪贴板监听（文本与图片）实时入库 MySQL 正常，`http://127.0.0.1:37618/api/status` 与 `/api/records` 响应正常。
 
 #### 3. 已部署（Deployed）
-- **当前状态：未部署（None）**。
-- 现场只读巡检确认：开发测试服务器 `bingo-dev` 尚未建立 clipsync-server 的服务或容器，GitHub Actions CI/CD 流水线尚待落地。
+- **当前状态：已部署至开发测试服务器 `bingo-dev`**。
+- **流水线状态**：GitHub Actions CI/CD 流水线 `.github/workflows/ci-cd.yml` 全绿通过，自宿主 Runner 自动化构建热部署。
+- **运行版本 SHA**：`9bf84614716c6786eccf3f4d305b42397b441717`（与 `main` 主干完全一致）。
+- **验证端点**：
+  - 本地回环：`http://127.0.0.1:37617/healthz`
+  - 公共 HTTPS：`https://dev.openal.uk/clipsync/healthz`
+  - 提示词模板 API：`https://dev.openal.uk/clipsync/api/v1/clipboard/prompts`
 
 #### 4. 待你验收（Pending Project Lead Acceptance）
-以下特性开发者已自测通过，正处于工作区修改状态，待交接负责人业务验收：
+以下特性开发者已全量自测与构建核验通过，流水线已发布上线，待交接负责人业务验收：
+- [ ] **剪贴板内容持久收藏 (Favorites)**：单条/批量星标持久化、FIFO 自动淘汰豁免、专属收藏视图与保护性批量删除（默认保留收藏）。
+- [ ] **AI 常用提示词/智能模板库 (Prompt Library)**：4 套内置高频种子模板、`{clip}` 与自定义插槽变量解析、参数弹窗动态渲染与合成写入剪贴板。
 - [ ] **前台目标窗口双击精准输入**：在记事本/浏览器中激活光标，`Alt+V` 唤起 WinUI，双击某条记录，核验是否自动将焦点归还记事本并正确贴入内容。
-- [ ] **列表右键上下文菜单**：右键单条记录，核验“复制”、“输入”、“删除”、“设为密码”、“设为账户”功能响应是否符合直觉。
-- [ ] **分页滚动平滑度**：列表滑动触底时 Offset 分页增量加载的平滑度。
-- [ ] **敏感账户密码弹窗**：将一条记录标记为密码时，弹出的账户输入框与自动生成强密码功能是否可用。
-- [ ] **亚克力与右上角贴靠**：核验窗口是否优雅停靠于工作区右上角且不遮挡任务栏。
+- [ ] **列表右键上下文菜单**：右键单条记录，核验“复制”、“输入”、“删除”、“设为密码”、“设为账户”、“收藏/取消收藏”功能响应。
+- [ ] **Android 移动端协同**：Tab 切换（全部/收藏/常用提示词）、星标切换与动态参数提示词填词写入。
+- [ ] **CI/CD 流水线自宿主发布**：向主干推送提交自动触发 GitHub Actions 并在 1 分钟内完成 `bingo-dev` 部署。
 
 #### 5. 未完成与后续待办（Pending & Tech Debt）
-- [ ] **配置 GitHub Actions CI/CD 快速部署流水线**（高优先级，见 [`docs/project/issues.json`](project/issues.json) ISSUE-006）。
+- [x] **配置 GitHub Actions CI/CD 快速部署流水线**（已落地并经测试验证，见 [`docs/project/issues.json`](project/issues.json) ISSUE-006）。
 - [ ] **搭建测试服务器 systemd / Docker 部署模版与 Cloudflare Tunnel 路由配置**。
 - [ ] **引入规范化向上/向下数据库迁移体系**（替代单一幂等工具脚本，ISSUE-004）。
 - [ ] **版本化二进制图片传输接口**（替代单条 Base64 JSON 传输，减少内存与网络开销，ISSUE-002）。
